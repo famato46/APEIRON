@@ -1,5 +1,5 @@
 # APEIRON
-Progetto IBM - gruppo 15 - APEIRON
+IBM Project - gruppo 15 -> APEIRON
 
 - Francesca Gaia Amato
 - Giovanni Guercia
