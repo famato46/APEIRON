@@ -6,6 +6,3 @@ IBM Project - gruppo 15 -> APEIRON
 - Bruno Oliva
 - Carmine Fonzo
 - Simone De Riggi
-
-
-ciaoo a tutti
