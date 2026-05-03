@@ -6,4 +6,5 @@ IBM Project - gruppo 15 -> APEIRON
 - Bruno Oliva
 - Carmine Fonzo
 - Simone De Riggi
-<img width="873" height="879" alt="LogoAPEIRON" src="https://github.com/user-attachments/assets/75c9c215-3545-4f57-b7f4-5f32d4c38a44" />
+<img width="840" height="429" alt="image" src="https://github.com/user-attachments/assets/5decf53b-81f6-438c-be33-51c9ca891b08" />
+
