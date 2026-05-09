@@ -4,7 +4,7 @@
       <img width="334" height="59" alt="LogoAPEIRON copia 2" src="https://github.com/user-attachments/assets/df21fd67-f9d2-4b1f-9bcd-98d949915cdf" />
     </td>
     <td>
-      <img width="356" height="200" alt="IBM_2025_Ferrari_1101_PressReleaseHeaderImage_Social" src="https://github.com/user-attachments/assets/912d6d2f-7eba-4fb8-aca9-4c27ecc77216" />
+      <img width="105" height="59" alt="IBM_2025_Ferrari_1101_PressReleaseHeaderImage_Social" src="https://github.com/user-attachments/assets/912d6d2f-7eba-4fb8-aca9-4c27ecc77216" />
     </td>
   </tr>
 </table>
