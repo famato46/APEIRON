@@ -1,10 +1,13 @@
 # <table>
   <tr>
     <td>
+      <img width="420" height="215" alt="LogoAPEIRON copia" src="https://github.com/user-attachments/assets/7ba8eb35-5b2c-40e1-8f15-865ffcd38d04" />
+    </td>
+    <td>
       <img width="334" height="59" alt="LogoAPEIRON copia 2" src="https://github.com/user-attachments/assets/df21fd67-f9d2-4b1f-9bcd-98d949915cdf" />
     </td>
     <td>
-      <img width="177,78" height="100" alt="IBM_2025_Ferrari_1101_PressReleaseHeaderImage_Social" src="https://github.com/user-attachments/assets/912d6d2f-7eba-4fb8-aca9-4c27ecc77216" />
+      <img width="178" height="100" alt="IBM_2025_Ferrari_1101_PressReleaseHeaderImage_Social" src="https://github.com/user-attachments/assets/912d6d2f-7eba-4fb8-aca9-4c27ecc77216" />
     </td>
   </tr>
 </table>
