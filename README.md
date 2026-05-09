@@ -1,7 +1,7 @@
 # <table>
   <tr>
     <td>
-      <img width="420" height="215" alt="LogoAPEIRON copia" src="https://github.com/user-attachments/assets/7ba8eb35-5b2c-40e1-8f15-865ffcd38d04" />
+      <img width="195,8" height="100" alt="LogoAPEIRON copia" src="https://github.com/user-attachments/assets/7ba8eb35-5b2c-40e1-8f15-865ffcd38d04" />
     </td>
     <td>
       <img width="334" height="59" alt="LogoAPEIRON copia 2" src="https://github.com/user-attachments/assets/df21fd67-f9d2-4b1f-9bcd-98d949915cdf" />
