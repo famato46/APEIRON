@@ -2,7 +2,7 @@
 <h1>🏎️ APEIRON - AI Autonomous Racing Team</h1>
 
 Welcome to the official repository of team APEIRON, one of the UNISA (University of Salerno) teams participating in the IBM AI Racing Competition.
-This repository contains the driver code for developing an autonomous driving agent within the TORCS simulator, with parameters and features optimized using IBM Granite.
+This repository contains the driver code for developing an autonomous driving agent within the TORCS simulator, with parameters and features optimized using __IBM Granite__.
 
 <h2>IBM AI Racing Competition Project (team 15) --> APEIRON (UNISA)</h2>
 
