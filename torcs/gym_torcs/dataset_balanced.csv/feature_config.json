@@ -1,0 +1,39 @@
+{
+  "input_features": [
+    "speedX",
+    "angle",
+    "trackPos",
+    "dist_from_start",
+    "track_0",
+    "track_4",
+    "track_9",
+    "track_14",
+    "track_18",
+    "delta_track"
+  ],
+  "targets": [
+    "steer",
+    "accel",
+    "brake"
+  ],
+  "splits": {
+    "train_frac": 0.8,
+    "val_frac": 0.1,
+    "test_frac": 0.1
+  },
+  "random_state": 42,
+  "extra_tracks": false,
+  "balancing": {
+    "soglia_dritto": 0.05,
+    "keep_dritto": 0.3,
+    "soglia_dolce": 0.1,
+    "keep_dolce": 0.7,
+    "soglia_media": 0.3,
+    "dup_media": 2,
+    "soglia_forte": 0.6,
+    "dup_forte": 3
+  },
+  "n_train": 32407,
+  "n_val": 4649,
+  "n_test": 4649
+}
