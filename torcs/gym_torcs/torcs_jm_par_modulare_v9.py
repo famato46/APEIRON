@@ -87,7 +87,7 @@ ophelp += ' --help, -h           Show this help.\n'
 ophelp += ' --version, -v        Show current version.'
 usage   = 'Usage: %s [ophelp [optargs]] \n' % sys.argv[0]
 usage   = usage + ophelp
-version = "il-dataset-3.5-fastsector-v2"
+version = "il-dataset-3.4-fastsector"
 
 
 def clip(v, lo, hi):
@@ -478,16 +478,16 @@ CHICANE_APPROACH_END   = 3042.0
 # ----------------------------------------------------------------------
 FAST_SECTOR_START     = 3300.0
 FAST_SECTOR_END       = 3650.0
-FAST_SECTOR_CURV_THRESH = 0.22   # alzato: curve leggerissime non devono bloccare il floor
+FAST_SECTOR_CURV_THRESH = 0.30
 FAST_SECTOR_FLOOR_MAP = [
-    # (dist_from_start, v_floor_kmh)
-    (3300, 230.0),
-    (3380, 248.0),
-    (3460, 258.0),
-    (3540, 265.0),
-    (3620, 265.0),
+    (3300, 240.0),
+    (3360, 255.0),
+    (3420, 262.0),
+    (3480, 265.0),
+    (3560, 265.0),
     (3650, 265.0),
 ]
+FAST_SECTOR_HARD_BRAKE_START = 3610.0
 
 # ----------------------------------------------------------------------
 # CAMBIO MARCE — completamente riprogettato sui regimi umani.
@@ -700,8 +700,6 @@ def lookup_target_speed(track, S=None):
                 base_speed = min(base_speed, ch)
             fs = fast_sector_floor_speed(dist_from_start, estimate_curvature(track))
             if fs is not None:
-                # Il floor vince su tutto: SPEED_MAP, curvatura e spazio_frenata.
-                # Nel fast sector (curve leggerissime) il bot deve tenere gas spalancato.
                 base_speed = max(base_speed, fs)
 
     return base_speed
@@ -1126,6 +1124,17 @@ def drive(c):
     R['brake'] = brake
     R['gear']  = shift_gears(S)
 
+    # FAST SECTOR DIRECT OVERRIDE
+    dfs = S.get('distFromStart', 0.0)
+    if FAST_SECTOR_START <= dfs <= FAST_SECTOR_END:
+        curv = abs(estimate_curvature(track))
+        angle = S.get('angle', 0.0)
+        track_pos = S.get('trackPos', 0.0)
+        is_safe = abs(angle) < 0.20 and abs(track_pos) < 0.85
+        if curv < FAST_SECTOR_CURV_THRESH and is_safe and dfs < FAST_SECTOR_HARD_BRAKE_START:
+            R['accel'] = 1.0
+            R['brake'] = 0.0
+
     if is_manual_override:
         if manual_steer != 0.0:
             R['steer'] = manual_steer
@@ -1191,7 +1200,7 @@ if __name__ == "__main__":
         writer.writerow(headers)
 
         print("=" * 60)
-        print(" TORCS bot v2.11 — FAST SECTOR FLOOR v2 (curv_thresh 0.22)")
+        print(" TORCS bot v2.10 — FAST SECTOR FLOOR (target 1:11)")
         print(f"   RPM_UP={RPM_UP}, RPM_DOWN={RPM_DOWN}")
         print(f"   GEAR_MIN_SPEED={GEAR_MIN_SPEED}")
         print(f"   SPEED_MAP top={SPEED_MAP[0][1]:.0f} km/h, low={SPEED_MAP[-1][1]:.0f} km/h")
