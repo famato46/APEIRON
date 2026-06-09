@@ -33,7 +33,7 @@
     "soglia_forte": 0.6,
     "dup_forte": 3
   },
-  "n_train": 2956,
-  "n_val": 294,
-  "n_test": 294
+  "n_train": 60952,
+  "n_val": 4950,
+  "n_test": 4951
 }
