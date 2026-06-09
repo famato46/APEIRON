@@ -32,7 +32,7 @@ FEATURE_CFG_PATH = 'feature_config.json'
 
 # Soglie safety net standard
 TRACKPOS_SAFE   = 0.92
-TRACKPOS_BLEND  = 0.80
+TRACKPOS_BLEND  = 0.65
 ANGLE_SAFE      = 0.45
 RECOVERY_STEER_GAIN = 0.5
 RECOVERY_ANGLE_GAIN = 2.0
@@ -42,9 +42,9 @@ SPIN_ANGLE      = 1.2     # rad ~ 70 gradi: oltre, siamo decisamente di traverso
 SPIN_RECOVERY_MAX_SPEED = 30.0  # km/h
 
 # Anti-overspeed in curva
-PREBRAKE_TRACK9_THRESHOLD = 30.0
-PREBRAKE_SPEED_THRESHOLD  = 130.0
-PREBRAKE_FORCE            = 0.35
+PREBRAKE_TRACK9_THRESHOLD = 55.0
+PREBRAKE_SPEED_THRESHOLD  = 100.0
+PREBRAKE_FORCE            = 0.55
 
 # Anti-stallo
 MIN_SPEED_STALL = 5.0
@@ -141,27 +141,37 @@ def build_state(S):
 # SAFETY NET geometrico
 # =================================================================
 
-def recovery_steer(track_pos, angle):
+_prev_track_pos = 0.0
+
+def recovery_steer(track_pos, angle, speed_x=0.0):
+    # gain scalato con velocità: a 200 km/h serve più controsterzo
+    v_gain = 1.0 + max(0.0, speed_x - 80.0) / 120.0
     return float(np.clip(
-        -track_pos * RECOVERY_STEER_GAIN + angle * RECOVERY_ANGLE_GAIN,
+        -track_pos * RECOVERY_STEER_GAIN * v_gain + angle * RECOVERY_ANGLE_GAIN,
         -1.0, 1.0,
     ))
 
 
-def blend_factor(track_pos, angle):
+def blend_factor(track_pos, angle, drift_rate=0.0):
     abs_tp = abs(track_pos)
     abs_an = abs(angle)
+    # componente posizione
     if abs_tp <= TRACKPOS_BLEND:
         w_tp = 0.0
     elif abs_tp >= TRACKPOS_SAFE:
         w_tp = 1.0
     else:
         w_tp = (abs_tp - TRACKPOS_BLEND) / (TRACKPOS_SAFE - TRACKPOS_BLEND)
+    # componente angolo
     if abs_an >= ANGLE_SAFE:
         w_an = 1.0
     else:
         w_an = max(0.0, (abs_an - ANGLE_SAFE * 0.5) / (ANGLE_SAFE * 0.5))
-    return max(w_tp, w_an)
+    # componente drift verso il bordo: se stiamo scivolando fuori attiva prima
+    w_drift = 0.0
+    if abs_tp > 0.45 and drift_rate * track_pos > 0.002:
+        w_drift = min(1.0, drift_rate * track_pos * 40.0)
+    return max(w_tp, w_an, w_drift)
 
 
 # =================================================================
@@ -250,6 +260,8 @@ def run_ai():
     last_log_t = 0.0
     in_recovery = False
     recovery_counter = 0
+    global _prev_track_pos
+    _prev_track_pos = 0.0
 
     while True:
         try:
@@ -303,35 +315,55 @@ def run_ai():
                 accel     = float(np.clip(y[1],  0.0, 1.0))
                 brake     = float(np.clip(y[2],  0.0, 1.0))
 
-                steer_rec = recovery_steer(track_pos, angle)
-                w = blend_factor(track_pos, angle)
+                steer_rec = recovery_steer(track_pos, angle, speed_x)
+                drift_rate = track_pos - _prev_track_pos
+                _prev_track_pos = track_pos
+                w = blend_factor(track_pos, angle, drift_rate)
+                # Forza blend verso recovery se track frontale quasi esaurito
+                if track_9 < 15.0:
+                    w = max(w, 0.7)
                 steer = (1.0 - w) * steer_mlp + w * steer_rec
 
+                # Quando blend è attivo: frena + togli gas proporzionalmente
+                if w > 0.3 and speed_x > 60.0:
+                    accel = min(accel, max(0.0, 1.0 - w))
+                    brake = max(brake, min(0.6, w * 0.5))
+
                 if abs(track_pos) > TRACKPOS_SAFE:
-                    accel = min(accel, 0.3)
+                    accel = min(accel, 0.2)
+                    brake = max(brake, 0.3)
 
                 if needs_prebrake(track_9, speed_x):
-                    brake = max(brake, PREBRAKE_FORCE)
+                    extra = (speed_x - PREBRAKE_SPEED_THRESHOLD) / 100.0
+                    brake = max(brake, PREBRAKE_FORCE + 0.25 * extra)
+                    accel = 0.0
 
-                # Freno reale solo sopra 0.18; sotto è residuo MLP in curva
-                if brake > 0.18:
+                # Cap accel quando il muro frontale è vicino e si è veloci
+                if track_9 < 80.0 and speed_x > 80.0:
+                    accel = min(accel, max(0.0, (track_9 - 20.0) / 60.0))
+
+                # Freno reale solo sopra 0.20; sotto è residuo MLP in curva
+                if brake > 0.20:
                     accel = 0.0
                 else:
                     brake = 0.0
-                    if abs(track_pos) < 0.88:
-                        if speed_x < 40.0:
+                    if abs(track_pos) < 0.90:
+                        if speed_x < 30.0:
+                            accel = max(accel, 1.00)
+                        elif speed_x < 55.0:
                             accel = max(accel, 0.85)
-                        elif speed_x < 70.0:
+                        elif speed_x < 80.0:
                             accel = max(accel, 0.65)
-                        elif speed_x < 100.0:
-                            accel = max(accel, 0.45)
+                        elif speed_x < 110.0:
+                            accel = max(accel, 0.42)
                         elif speed_x < 140.0:
-                            accel = max(accel, 0.25)
+                            accel = max(accel, 0.22)
 
-                if abs(speed_x) < MIN_SPEED_STALL and abs(track_pos) < 0.9:
-                    accel = max(accel, 0.6)
+                # Stallo: kickdown pieno + forza marcia 1
+                if abs(speed_x) < MIN_SPEED_STALL and abs(track_pos) < 0.95:
+                    accel = 1.0
                     brake = 0.0
-                    gear = max(1, gear)
+                    gear = 1
 
                 gear = gear_logic(speed_x, gear)
                 w_log = w
