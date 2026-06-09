@@ -26,14 +26,14 @@ HOST = 'localhost'
 PORT = 3001
 DATA_SIZE = 2**17
 
-MODEL_PATH       = 'model_bc.joblib'
+MODEL_PATH       = 'models/model_bc.joblib'
 SCALER_PATH      = 'scaler.joblib'
 FEATURE_CFG_PATH = 'feature_config.json'
 
 # Soglie safety net standard
-TRACKPOS_SAFE   = 0.85
-TRACKPOS_BLEND  = 0.70
-ANGLE_SAFE      = 0.30
+TRACKPOS_SAFE   = 0.92
+TRACKPOS_BLEND  = 0.80
+ANGLE_SAFE      = 0.45
 RECOVERY_STEER_GAIN = 0.5
 RECOVERY_ANGLE_GAIN = 2.0
 
@@ -42,13 +42,14 @@ SPIN_ANGLE      = 1.2     # rad ~ 70 gradi: oltre, siamo decisamente di traverso
 SPIN_RECOVERY_MAX_SPEED = 30.0  # km/h
 
 # Anti-overspeed in curva
-PREBRAKE_TRACK9_THRESHOLD = 50.0   # m: track_9 sotto questo = "curva vicina"
-PREBRAKE_SPEED_THRESHOLD  = 100.0  # km/h
-PREBRAKE_FORCE            = 0.5
+PREBRAKE_TRACK9_THRESHOLD = 30.0
+PREBRAKE_SPEED_THRESHOLD  = 130.0
+PREBRAKE_FORCE            = 0.35
 
 # Anti-stallo
 MIN_SPEED_STALL = 5.0
-STALL_PATIENCE  = 100
+STALL_PATIENCE  = 60
+STALL_PATIENCE_HARD = 120
 
 
 # =================================================================
@@ -179,8 +180,8 @@ def gear_logic(speed_kmh, current_gear):
     if speed_kmh < 5.0:
         return max(1, current_gear) if current_gear > 0 else 1
 
-    down_thresh = {2: 35, 3: 75, 4: 115, 5: 160, 6: 200}
-    up_thresh   = {1: 55, 2: 95, 3: 135, 4: 180, 5: 215}
+    down_thresh = {2: 25, 3: 60, 4: 95, 5: 140, 6: 180}
+    up_thresh   = {1: 60, 2: 100, 3: 145, 4: 190, 5: 225}
 
     g = current_gear if current_gear >= 1 else 1
 
@@ -315,6 +316,12 @@ def run_ai():
                 if brake > 0.1:
                     accel = 0.0
 
+                # Se l'auto e' ferma o quasi e il MLP non da' gas,
+                # forza accel minimo per uscire dalla situazione di stallo
+                if abs(speed_x) < MIN_SPEED_STALL and brake < 0.05 and abs(track_pos) < 0.9:
+                    accel = max(accel, 0.6)
+                    gear = max(1, gear)
+
                 gear = gear_logic(speed_x, gear)
                 w_log = w
 
@@ -325,11 +332,11 @@ def run_ai():
                     accel = 1.0
                     brake = 0.0
                     gear  = 1
-                    if stall_counter > STALL_PATIENCE * 3:
-                        print("[ai_driver] STALLO PROLUNGATO: meta=1")
-                        so.sendto(b"(meta 1)", (HOST, PORT))
-                        stall_counter = 0
-                        continue
+                if stall_counter > STALL_PATIENCE_HARD:
+                    print("[ai_driver] STALLO PROLUNGATO: meta=1")
+                    so.sendto(b"(meta 1)", (HOST, PORT))
+                    stall_counter = 0
+                    continue
             else:
                 stall_counter = 0
 
