@@ -478,16 +478,15 @@ CHICANE_APPROACH_END   = 3042.0
 # ----------------------------------------------------------------------
 FAST_SECTOR_START     = 3300.0
 FAST_SECTOR_END       = 3650.0
-FAST_SECTOR_CURV_THRESH = 0.30
+FAST_SECTOR_CURV_THRESH = 0.06   # curvatura massima per applicare il floor
 FAST_SECTOR_FLOOR_MAP = [
-    (3300, 240.0),
-    (3360, 255.0),
-    (3420, 262.0),
-    (3480, 265.0),
-    (3560, 265.0),
+    # (dist_from_start, v_floor_kmh)
+    (3300, 210.0),
+    (3400, 235.0),
+    (3500, 255.0),
+    (3600, 265.0),
     (3650, 265.0),
 ]
-FAST_SECTOR_HARD_BRAKE_START = 3610.0
 
 # ----------------------------------------------------------------------
 # CAMBIO MARCE — completamente riprogettato sui regimi umani.
@@ -1123,17 +1122,6 @@ def drive(c):
     R['accel'] = accel
     R['brake'] = brake
     R['gear']  = shift_gears(S)
-
-    # FAST SECTOR DIRECT OVERRIDE
-    dfs = S.get('distFromStart', 0.0)
-    if FAST_SECTOR_START <= dfs <= FAST_SECTOR_END:
-        curv = abs(estimate_curvature(track))
-        angle = S.get('angle', 0.0)
-        track_pos = S.get('trackPos', 0.0)
-        is_safe = abs(angle) < 0.20 and abs(track_pos) < 0.85
-        if curv < FAST_SECTOR_CURV_THRESH and is_safe and dfs < FAST_SECTOR_HARD_BRAKE_START:
-            R['accel'] = 1.0
-            R['brake'] = 0.0
 
     if is_manual_override:
         if manual_steer != 0.0:
