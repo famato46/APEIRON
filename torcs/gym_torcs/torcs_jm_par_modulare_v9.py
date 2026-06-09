@@ -87,7 +87,7 @@ ophelp += ' --help, -h           Show this help.\n'
 ophelp += ' --version, -v        Show current version.'
 usage   = 'Usage: %s [ophelp [optargs]] \n' % sys.argv[0]
 usage   = usage + ophelp
-version = "il-dataset-2.3-aggressive-corkscrew"
+version = "il-dataset-3.1-antispin-fixed-sign"
 
 
 def clip(v, lo, hi):
@@ -326,12 +326,40 @@ listener.start()
 # ----------------------------------------------------------------------
 STEER_K_E              = 0.65   # era 1.0 — meno richiamo al centro pista
 STEER_K_SOFT           = 5.0
-STEER_K_HEADING        = 1.45   # era 1.3
+# STEER_K_HEADING e' ora speed-dependent (vedi calculate_steering) — FIX v2.5
+# v >= 120 km/h: 1.35 | v = 60-120: 1.45 | v < 60: 1.10
+# Motivo: K=1.45 funzionava a 1900m (S-curve 80-115 km/h, v2.3 stabile)
+# ma causava pendolo a 3200m (slow corner 57-65 km/h). K globale 1.10 (v2.4)
+# ha anticpato il flip dello sterzo nell'S-curve -> testacoda a 1943m.
+# Soluzione: K ridotto SOLO a v<60 km/h dove c'era il pendolo originale.
+STEER_K_HEADING        = 1.45   # valore base, sovrascritto speed-dep in calculate_steering
 STEER_K_LOOKAHEAD      = 0.75   # era 0.55 — piu' feedforward su curve viste
 STEER_K_LOOKAHEAD_VSCALE = 0.006
-ANGLE_FILTER_ALPHA     = 0.4
+ANGLE_FILTER_ALPHA     = 0.40   # REVERT v2.5: 0.25 (v2.4) aveva meno lag ma
+                                  # anticipava il cambio segno heading nell'S-curve
+                                  # di 1900m di ~3 step -> overshoot -> testacoda
 STEER_MAX_DELTA        = 0.10   # era 0.13 — l'umano ha |Δsteer| meta' del bot
 STEER_RAD_TO_CMD       = 1.0
+
+SNAP_ANGLE_THRESH      = 0.15   # rad: abs(filtered_angle) sopra cui scatta il cap
+SNAP_STEER_THRESH      = 0.08   # steer deve essere fuori dal centro (not near zero)
+SNAP_MAX_DELTA         = 0.04   # max_delta ridotto anti snap-oversteer
+
+# --- CONTROSTERZO DI EMERGENZA / ANTI-SPIN (v2.8) ---
+# Condizione necessaria per attivare il blocco: angolo alto E in crescita rapida.
+# yaw_rate = angle(t) - angle(t-1) per step (a 50Hz = rad/step).
+# Un angolo alto ma STABILE (auto in curva normale) ha yaw_rate ~ 0.
+# Un testacoda attivo ha yaw_rate concordante con il segno di angle e >= soglia.
+ANTISPIN_ANGLE_DANGER  = 0.35   # rad: soglia minima angolo per considerare il blocco
+ANTISPIN_YAWRATE_MIN   = 0.008  # rad/step: yaw_rate minimo per confermare spin attivo
+ANTISPIN_ANGLE_SAFE    = 0.15   # rad: soglia di uscita dal flag (isteresi)
+ANTISPIN_STEER_NUDGE   = 0.10   # controsterzo minimo forzato quando spin confermato
+# v11: segno corretto. Nel controller funzionante steer ha lo STESSO segno di
+# angle (verificato sui dati: angle>0 -> steer>0, angle<0 -> steer<0). Quindi
+# il controsterzo di recovery e' +K*angle, NON -K*angle (v2.9 aveva il segno
+# invertito e amplificava il testacoda).
+ANTISPIN_K_RECOVERY    = 2.0    # a |angle|=0.5 rad -> steer 1.0 (pieno ma non istantaneo)
+ANTISPIN_RECOVERY_MAX_DELTA = 0.25   # slew di emergenza (5x il normale a bassa v)
 
 # Coefficiente del target trackPos out-in-out:
 # target_trackpos = -TRACKPOS_OUTIN_GAIN * curvatura_anticipata
@@ -415,6 +443,21 @@ CORKSCREW_SPEED_OVERRIDE = [
 CORKSCREW_START = 2280.0
 CORKSCREW_END   = 2600.0
 
+# v11: chicane finale (3040-3140 m). Unico punto dove l'auto andava in
+# testacoda. Tetto di velocita' conservativo estratto dal dataset umano
+# (3040=139, 3061=89, 3082=65 km/h). Abbassa la velocita' di ingresso.
+CHICANE_FINAL_OVERRIDE = [
+    (3040, 135.0),
+    (3055, 110.0),
+    (3070,  90.0),
+    (3085,  75.0),
+    (3100,  80.0),
+    (3120, 105.0),
+    (3140, 135.0),
+]
+CHICANE_FINAL_START = 3040.0
+CHICANE_FINAL_END   = 3140.0
+
 # ----------------------------------------------------------------------
 # CAMBIO MARCE — completamente riprogettato sui regimi umani.
 #
@@ -478,11 +521,14 @@ _state = {
     'prev_steer': 0.0,
     'steer_ema_slow': 0.0,
     'filtered_angle': 0.0,
+    'prev_angle': 0.0,               # v2.8: per calcolo yaw_rate
     'prev_gear': 1,
     'gear_change_cooldown': 0,
     'debug_step': 0,
-    'last_target_tp': 0.0,           # NUOVO: per smoothing del target trackpos
-    'curv_anticip_ema': 0.0,         # NUOVO: EMA della curvatura anticipata
+    'last_target_tp': 0.0,
+    'curv_anticip_ema': 0.0,
+    'antispin_active': False,
+    'drive_mode': 'normal',          # v11: 'normal' | 'recovery' (coast throttle)
 }
 
 
@@ -517,6 +563,23 @@ def corkscrew_override_speed(dist_from_start):
         return None
     pts = CORKSCREW_SPEED_OVERRIDE
     # interpolazione lineare
+    if dist_from_start <= pts[0][0]:
+        return pts[0][1]
+    if dist_from_start >= pts[-1][0]:
+        return pts[-1][1]
+    for i in range(len(pts) - 1):
+        d_lo, v_lo = pts[i]
+        d_hi, v_hi = pts[i + 1]
+        if d_lo <= dist_from_start <= d_hi:
+            t = (dist_from_start - d_lo) / (d_hi - d_lo)
+            return v_lo + t * (v_hi - v_lo)
+    return None
+
+
+def chicane_final_override_speed(dist_from_start):
+    if dist_from_start < CHICANE_FINAL_START or dist_from_start > CHICANE_FINAL_END:
+        return None
+    pts = CHICANE_FINAL_OVERRIDE
     if dist_from_start <= pts[0][0]:
         return pts[0][1]
     if dist_from_start >= pts[-1][0]:
@@ -576,6 +639,9 @@ def lookup_target_speed(track, S=None):
             cs = corkscrew_override_speed(dist_from_start)
             if cs is not None:
                 base_speed = min(base_speed, cs)
+            ch = chicane_final_override_speed(dist_from_start)
+            if ch is not None:
+                base_speed = min(base_speed, ch)
 
     return base_speed
 
@@ -664,33 +730,66 @@ def calculate_steering(S):
 
     In modalita' recovery (|angle|>0.5 rad o |trackPos|>0.9) disabilita
     il feedforward e azzera il target_trackpos (priorita' al rientro).
+
+    v2.7: CONTROSTERZO DI EMERGENZA / ANTI-SPIN
+    Se abs(angle) > ANTISPIN_ANGLE_DANGER l'auto e' in sovrasterzo critico.
+    In quella condizione:
+      - Il target_trackpos viene azzerato (priorita' alla stabilizzazione).
+      - Lo steer NON puo' essere concordante con la rotazione in corso:
+          angle < -ANTISPIN_ANGLE_DANGER -> steer forzato >= +ANTISPIN_STEER_NUDGE
+          angle > +ANTISPIN_ANGLE_DANGER -> steer forzato <= -ANTISPIN_STEER_NUDGE
+      - Il flag rimane attivo finche' abs(angle) > ANTISPIN_ANGLE_SAFE (isteresi).
     """
     angle      = S.get('angle', 0.0)
     track_pos  = S.get('trackPos', 0.0)
     track      = S.get('track', [200.0] * 19)
     speedX_kmh = S.get('speedX', 0.0)
 
-    # === FIX v2.2 (3) — SOGLIE ANOMALIA RIALZATE ===
-    # Solo testacoda veri (>~70°) o uscita quasi totale di pista attivano
-    # il recovery, NON le curve strette regolari.
     is_anomalous = abs(angle) > 1.2 or abs(track_pos) > 0.99
 
     af = (1.0 - ANGLE_FILTER_ALPHA) * angle + ANGLE_FILTER_ALPHA * _state['filtered_angle']
     _state['filtered_angle'] = af
 
-    k_h = STEER_K_HEADING * (1.8 if is_anomalous else 1.0)
+    # === v2.8: ANTI-SPIN con yaw_rate =========================================
+    # yaw_rate positivo = angolo che cresce verso sinistra,
+    # yaw_rate negativo = angolo che cresce verso destra.
+    # Lo spin attivo e': angolo alto (abs > DANGER) E angolo che sta
+    # CRESCENDO nella sua direzione (angle * yaw_rate > 0, sopra soglia).
+    # Se l'angolo e' alto ma in diminuzione (recovery in corso o curva
+    # normale che si sta chiudendo), il flag NON scatta.
+    yaw_rate = angle - _state['prev_angle']
+    _state['prev_angle'] = angle
+
+    spin_growing = (abs(angle) > ANTISPIN_ANGLE_DANGER
+                    and abs(yaw_rate) >= ANTISPIN_YAWRATE_MIN
+                    and angle * yaw_rate > 0.0)
+
+    if spin_growing:
+        _state['antispin_active'] = True
+    elif abs(angle) < ANTISPIN_ANGLE_SAFE:
+        _state['antispin_active'] = False
+    antispin_active = _state['antispin_active']
+    # =========================================================================
+
+    # === FIX v2.5: STEER_K_HEADING speed-dependent ===========================
+    if speedX_kmh >= 120.0:
+        k_h_base = 1.35
+    elif speedX_kmh >= 60.0:
+        k_h_base = 1.45
+    else:
+        k_h_base = 1.10
+    # ==========================================================================
+    k_h = k_h_base * (1.8 if is_anomalous else 1.0)
     heading_term = k_h * af
 
-    if is_anomalous:
+    # In anti-spin o recovery: niente feedforward, target_tp = 0
+    if is_anomalous or antispin_active:
         curvature = 0.0
         target_tp = 0.0
     else:
         curvature = estimate_curvature(track)
-        # Target trackpos out-in-out (NUOVO v2)
         target_tp = compute_target_trackpos(curvature, speedX_kmh)
 
-    # Stanley cross-track: ora rispetto a (track_pos - target_tp)
-    # Cosi' il bot accetta di stare OUT prima di curva, in apex, ecc.
     cross_err = track_pos - target_tp
     speed_ms = max(speedX_kmh / 3.6, 0.1)
     cross_track_term = -math.atan2(STEER_K_E * cross_err, STEER_K_SOFT + speed_ms)
@@ -701,26 +800,58 @@ def calculate_steering(S):
     raw_steer = heading_term + cross_track_term + lookahead_term
     target_steer = clip(raw_steer * STEER_RAD_TO_CMD, -1.0, 1.0)
 
-    # Slew rate limit scalato sulla velocita' — piu' restrittivo del v1
-    # (umano |Δsteer| per step e' meta' di quello del bot vecchio).
-    if speedX_kmh < 60:
-        max_delta = 0.15            # era 0.18
-    elif speedX_kmh < 100:
-        max_delta = 0.10            # era 0.12
-    elif speedX_kmh < 140:
-        max_delta = 0.07            # era 0.08
+    # === v11: CONTROSTERZO PROPORZIONALE — SEGNO CORRETTO + SLEW =============
+    # recovery_target = +K * angle (stesso segno del controller funzionante).
+    # angle>0 (muso ruotato) -> steer>0 riallinea. Slew di emergenza 0.25/step
+    # per evitare il pendolo speculare. Uscita graduale: quando antispin si
+    # spegne, prev_steer e' gia' coerente e rientra nel calcolo normale.
+    if antispin_active:
+        _state['drive_mode'] = 'recovery'
+        recovery_target = clip(ANTISPIN_K_RECOVERY * angle, -1.0, 1.0)
+        d = recovery_target - _state['prev_steer']
+        if d >  ANTISPIN_RECOVERY_MAX_DELTA: d =  ANTISPIN_RECOVERY_MAX_DELTA
+        if d < -ANTISPIN_RECOVERY_MAX_DELTA: d = -ANTISPIN_RECOVERY_MAX_DELTA
+        recovery_steer = clip(_state['prev_steer'] + d, -1.0, 1.0)
+        _state['steer_ema_slow'] = 0.90 * _state['steer_ema_slow'] + 0.10 * recovery_steer
+        _state['prev_steer'] = recovery_steer
+        if DEBUG_STEERING:
+            _state['debug_step'] += 1
+            if _state['debug_step'] % DEBUG_PRINT_EVERY == 0:
+                dfs = S.get('distFromStart', 0.0)
+                print(
+                    f"[ctrl] v={speedX_kmh:6.1f} ang={angle:+.2f} yr={yaw_rate:+.4f} "
+                    f"tp={track_pos:+.2f} dfs={dfs:6.0f} "
+                    f"steer={recovery_steer:+.2f} [ANTISPIN-PROP+]"
+                )
+        return recovery_steer
     else:
-        max_delta = 0.04            # era 0.05
+        _state['drive_mode'] = 'normal'
+    # =========================================================================
+
+    if speedX_kmh < 60:
+        max_delta = 0.15
+    elif speedX_kmh < 100:
+        max_delta = 0.10
+    elif speedX_kmh < 140:
+        max_delta = 0.07
+    else:
+        max_delta = 0.04
+
+    if (abs(af) > SNAP_ANGLE_THRESH
+            and abs(_state['prev_steer']) > SNAP_STEER_THRESH
+            and (target_steer - _state['prev_steer']) * _state['prev_steer'] < 0):
+        max_delta = min(max_delta, SNAP_MAX_DELTA)
+
     delta = target_steer - _state['prev_steer']
     if delta >  max_delta: delta =  max_delta
     if delta < -max_delta: delta = -max_delta
     final_steer = _state['prev_steer'] + delta
 
-    # Cap dello sterzo ad alta velocita': umano in apex usa |steer| ~ 0.4-0.6
     if speedX_kmh > 180.0:
-        final_steer = clip(final_steer, -0.55, 0.55)   # era -0.6, 0.6
+        final_steer = clip(final_steer, -0.55, 0.55)
 
     final_steer = clip(final_steer, -1.0, 1.0)
+
     _state['steer_ema_slow'] = 0.90 * _state['steer_ema_slow'] + 0.10 * final_steer
     _state['prev_steer'] = final_steer
 
@@ -736,6 +867,7 @@ def calculate_steering(S):
                 f"front={front_eff:5.1f} ang={angle:+.2f} tp={track_pos:+.2f} "
                 f"tp_tgt={target_tp:+.2f} dfs={dfs:6.0f} "
                 f"curv={curvature:+.2f} steer={final_steer:+.2f}"
+                + (" [ANTISPIN]" if antispin_active else "")
             )
 
     return final_steer
@@ -760,6 +892,13 @@ def calculate_throttle_and_brake(S, target_speed):
     speedX = S.get('speedX', 0.0)
     angle = S.get('angle', 0.0)
     track_pos = S.get('trackPos', 0.0)
+
+    # === v11: COAST DURANTE RECOVERY ANTI-SPIN ==============================
+    # Mentre si fa controsterzo per uscire dal testacoda, niente gas (che
+    # spinge il posteriore) e niente freno brusco (che blocca). Coast puro.
+    if _state.get('drive_mode') == 'recovery':
+        return (0.0, 0.0)
+    # =========================================================================
 
     # === FIX v2.2 (3) — SOGLIE ANOMALIA RIALZATE =============================
     # Le vecchie soglie (|angle|>0.5 o |tp|>0.9) facevano scattare il "panico"
@@ -981,7 +1120,7 @@ if __name__ == "__main__":
         writer.writerow(headers)
 
         print("=" * 60)
-        print(" TORCS bot v2.1 — TRAIL-BRAKE FIX (target 1:11)")
+        print(" TORCS bot v2.9 — ANTISPIN PROPORZIONALE (target 1:11)")
         print(f"   RPM_UP={RPM_UP}, RPM_DOWN={RPM_DOWN}")
         print(f"   GEAR_MIN_SPEED={GEAR_MIN_SPEED}")
         print(f"   SPEED_MAP top={SPEED_MAP[0][1]:.0f} km/h, low={SPEED_MAP[-1][1]:.0f} km/h")
