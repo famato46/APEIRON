@@ -313,13 +313,24 @@ def run_ai():
                 if needs_prebrake(track_9, speed_x):
                     brake = max(brake, PREBRAKE_FORCE)
 
-                if brake > 0.1:
+                # Freno reale solo sopra 0.18; sotto è residuo MLP in curva
+                if brake > 0.18:
                     accel = 0.0
+                else:
+                    brake = 0.0
+                    if abs(track_pos) < 0.88:
+                        if speed_x < 40.0:
+                            accel = max(accel, 0.85)
+                        elif speed_x < 70.0:
+                            accel = max(accel, 0.65)
+                        elif speed_x < 100.0:
+                            accel = max(accel, 0.45)
+                        elif speed_x < 140.0:
+                            accel = max(accel, 0.25)
 
-                # Se l'auto e' ferma o quasi e il MLP non da' gas,
-                # forza accel minimo per uscire dalla situazione di stallo
-                if abs(speed_x) < MIN_SPEED_STALL and brake < 0.05 and abs(track_pos) < 0.9:
+                if abs(speed_x) < MIN_SPEED_STALL and abs(track_pos) < 0.9:
                     accel = max(accel, 0.6)
+                    brake = 0.0
                     gear = max(1, gear)
 
                 gear = gear_logic(speed_x, gear)
