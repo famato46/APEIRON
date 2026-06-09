@@ -87,7 +87,7 @@ ophelp += ' --help, -h           Show this help.\n'
 ophelp += ' --version, -v        Show current version.'
 usage   = 'Usage: %s [ophelp [optargs]] \n' % sys.argv[0]
 usage   = usage + ophelp
-version = "il-dataset-3.4-fastsector"
+version = "il-dataset-3.5-fastsector-v2"
 
 
 def clip(v, lo, hi):
@@ -478,13 +478,14 @@ CHICANE_APPROACH_END   = 3042.0
 # ----------------------------------------------------------------------
 FAST_SECTOR_START     = 3300.0
 FAST_SECTOR_END       = 3650.0
-FAST_SECTOR_CURV_THRESH = 0.06   # curvatura massima per applicare il floor
+FAST_SECTOR_CURV_THRESH = 0.22   # alzato: curve leggerissime non devono bloccare il floor
 FAST_SECTOR_FLOOR_MAP = [
     # (dist_from_start, v_floor_kmh)
-    (3300, 210.0),
-    (3400, 235.0),
-    (3500, 255.0),
-    (3600, 265.0),
+    (3300, 230.0),
+    (3380, 248.0),
+    (3460, 258.0),
+    (3540, 265.0),
+    (3620, 265.0),
     (3650, 265.0),
 ]
 
@@ -699,6 +700,8 @@ def lookup_target_speed(track, S=None):
                 base_speed = min(base_speed, ch)
             fs = fast_sector_floor_speed(dist_from_start, estimate_curvature(track))
             if fs is not None:
+                # Il floor vince su tutto: SPEED_MAP, curvatura e spazio_frenata.
+                # Nel fast sector (curve leggerissime) il bot deve tenere gas spalancato.
                 base_speed = max(base_speed, fs)
 
     return base_speed
@@ -1188,7 +1191,7 @@ if __name__ == "__main__":
         writer.writerow(headers)
 
         print("=" * 60)
-        print(" TORCS bot v2.10 — FAST SECTOR FLOOR (target 1:11)")
+        print(" TORCS bot v2.11 — FAST SECTOR FLOOR v2 (curv_thresh 0.22)")
         print(f"   RPM_UP={RPM_UP}, RPM_DOWN={RPM_DOWN}")
         print(f"   GEAR_MIN_SPEED={GEAR_MIN_SPEED}")
         print(f"   SPEED_MAP top={SPEED_MAP[0][1]:.0f} km/h, low={SPEED_MAP[-1][1]:.0f} km/h")
