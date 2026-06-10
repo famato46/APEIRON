@@ -1,12 +1,14 @@
 # ============================================================
 # FILE 2: train_sac.py
 # ============================================================
-import os
-import torch
+import os 
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
+import torch 
 from stable_baselines3 import SAC
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
 from stable_baselines3.common.env_checker import check_env
 from torcs_env import TorcsEnv
+
 
 
 def main():

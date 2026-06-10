@@ -5,6 +5,7 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import snakeoil3_gym as snakeoil
+import torch
 
 
 class TorcsEnv(gym.Env):
