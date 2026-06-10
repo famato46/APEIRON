@@ -1,22 +1,8 @@
 """
-Bilanciamento del dataset per training MLP (Imitation Learning).
-
-PROBLEMA: il dataset prodotto da filter_dataset.py e' fortemente sbilanciato:
-~55% dei sample ha sterzo praticamente zero (rettilinei). Un MLP addestrato
-con loss MSE tenderebbe a predire sempre 0 per minimizzare l'errore medio,
-fallendo proprio nelle curve dove servirebbe sterzare.
-
-SOLUZIONE: ridistribuiamo i sample applicando in cascata:
-  1. SUBSAMPLING dei rettilinei (sample con |steer| piccolo)
-  2. OVERSAMPLING delle curve (sample con |steer| medio/forte)
-  3. Stratificazione finale per controllare la distribuzione
-
+Bilanciamento dataset per MLP da multipli file CSV.
 Uso:
-    python balance_dataset.py dataset_clean.csv -o dataset_balanced.csv
-    python balance_dataset.py dataset_clean.csv -o out.csv --plot
-
-L'output mantiene la stessa struttura del CSV in input (stesse colonne).
-Solo il numero di righe cambia.
+    python balance_dataset.py run1.csv run2.csv -o dataset_balanced.csv
+    python balance_dataset.py cartella_dati/*.csv -o dataset_balanced.csv
 """
 
 import pandas as pd
@@ -24,38 +10,24 @@ import numpy as np
 import argparse
 import sys
 from pathlib import Path
+import glob
 
 # Parametri di bilanciamento
-# Subsampling rettilinei: |steer| < SOGLIA_DRITTO -> tieni solo KEEP_DRITTO
 SOGLIA_DRITTO = 0.05
-KEEP_DRITTO = 0.30          # tieni solo il 30% (~scarta 70%)
+KEEP_DRITTO = 0.30
 
-# Subsampling intermedi (curve dolci, gia' abbastanza rappresentate)
 SOGLIA_DOLCE = 0.10
-KEEP_DOLCE = 0.70           # tieni il 70%
+KEEP_DOLCE = 0.70
 
-# Oversampling curve medie
 SOGLIA_MEDIA = 0.30
-DUP_MEDIA = 2               # duplica x2
+DUP_MEDIA = 2
 
-# Oversampling curve forti (rare e cruciali)
-DUP_FORTE = 3               # duplica x3 i sample con |steer| >= SOGLIA_MEDIA
-
+DUP_FORTE = 3
 
 def balance_by_steer(df: pd.DataFrame, seed: int = 42) -> pd.DataFrame:
-    """
-    Applica subsampling/oversampling in base al valore di 'steer'.
-
-    Bins:
-      - |steer| < SOGLIA_DRITTO       --> KEEP_DRITTO
-      - |steer| in [DRITTO, DOLCE)    --> KEEP_DOLCE
-      - |steer| in [DOLCE, MEDIA)     --> tieni tutto (no resampling)
-      - |steer| >= MEDIA              --> oversampling DUP_MEDIA o DUP_FORTE
-    """
     rng = np.random.default_rng(seed)
     abs_steer = df['steer'].abs()
 
-    # Maschere
     mask_dritto = abs_steer < SOGLIA_DRITTO
     mask_dolce = (abs_steer >= SOGLIA_DRITTO) & (abs_steer < SOGLIA_DOLCE)
     mask_normale = (abs_steer >= SOGLIA_DOLCE) & (abs_steer < SOGLIA_MEDIA)
@@ -64,40 +36,37 @@ def balance_by_steer(df: pd.DataFrame, seed: int = 42) -> pd.DataFrame:
 
     parts = []
 
-    # 1. Rettilinei: subsampling al KEEP_DRITTO
+    # 1. Rettilinei
     dritto = df[mask_dritto]
     n_keep = int(len(dritto) * KEEP_DRITTO)
     idx = rng.choice(len(dritto), n_keep, replace=False)
     parts.append(dritto.iloc[idx])
 
-    # 2. Curve dolci: subsampling al KEEP_DOLCE
+    # 2. Curve dolci
     dolce = df[mask_dolce]
     n_keep = int(len(dolce) * KEEP_DOLCE)
     idx = rng.choice(len(dolce), n_keep, replace=False)
     parts.append(dolce.iloc[idx])
 
-    # 3. Curve normali: tieni tutto
+    # 3. Curve normali
     parts.append(df[mask_normale])
 
-    # 4. Curve medie: oversampling DUP_MEDIA
+    # 4. Curve medie
     media = df[mask_media]
     for _ in range(DUP_MEDIA):
         parts.append(media)
 
-    # 5. Curve forti: oversampling DUP_FORTE
+    # 5. Curve forti
     forte = df[mask_forte]
     for _ in range(DUP_FORTE):
         parts.append(forte)
 
     out = pd.concat(parts, ignore_index=True)
-
-    # Shuffle finale (importante per il training)
     out = out.sample(frac=1.0, random_state=seed).reset_index(drop=True)
     return out
 
 
 def print_steer_distribution(df: pd.DataFrame, label: str = ""):
-    """Stampa la distribuzione dello sterzo a schermo (istogramma testuale)."""
     bins = [-1.01, -0.6, -0.3, -0.10, -0.05, 0.05, 0.10, 0.30, 0.6, 1.01]
     labels = ['<-0.6', '-0.6..-0.3', '-0.3..-0.1', '-0.1..-0.05',
               '-0.05..0.05', '0.05..0.1', '0.1..0.3', '0.3..0.6', '>0.6']
@@ -112,29 +81,47 @@ def print_steer_distribution(df: pd.DataFrame, label: str = ""):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Bilanciamento dataset per MLP")
-    parser.add_argument('input', help='CSV in input (output di filter_dataset.py)')
-    parser.add_argument('-o', '--output', default='dataset_balanced.csv',
-                        help='CSV in output')
-    parser.add_argument('--seed', type=int, default=42,
-                        help='Seed per random subsampling (default: 42)')
-    parser.add_argument('--plot', action='store_true',
-                        help='Mostra istogramma prima/dopo')
+    parser = argparse.ArgumentParser(description="Bilanciamento dataset multi-file")
+    parser.add_argument('inputs', nargs='+', help='File CSV in input (supporta espressioni come data/*.csv)')
+    parser.add_argument('-o', '--output', default='dataset_balanced.csv', help='CSV in output')
+    parser.add_argument('--seed', type=int, default=42, help='Seed per random (default: 42)')
     args = parser.parse_args()
 
-    p = Path(args.input)
-    if not p.exists():
-        print(f"ERROR: {args.input} non trovato")
+    # Espansione dei percorsi (risolve i *.csv)
+    all_files = []
+    for path in args.inputs:
+        all_files.extend(glob.glob(path))
+    
+    if not all_files:
+        print("ERRORE: Nessun file trovato corrispondente agli input specificati.")
         sys.exit(1)
 
-    print(f"Leggo {args.input}...")
-    df = pd.read_csv(p)
-    print(f"Sample input: {len(df)}")
+    print(f"Trovati {len(all_files)} file da processare. Inizio caricamento...\n")
+    
+    dfs = []
+    righe_totali = 0
+    
+    # Nuovo LOG per ogni singolo file
+    for f in all_files:
+        try:
+            df_temp = pd.read_csv(f)
+            righe = len(df_temp)
+            dfs.append(df_temp)
+            righe_totali += righe
+            print(f"  [OK] {f:30s} -> {righe:6d} sample")
+        except Exception as e:
+            print(f"  [ERROR] Impossibile leggere {f}: {e}")
+            
+    if not dfs:
+        print("ERRORE CRITICO: Nessun dato caricato. Esco.")
+        sys.exit(1)
+
+    print("\nConcatenazione dei dataset in corso...")
+    df = pd.concat(dfs, ignore_index=True)
+    print(f"Dataset combinato: {len(df)} sample totali.")
 
     print_steer_distribution(df, "PRIMA")
-
     df_bal = balance_by_steer(df, seed=args.seed)
-
     print_steer_distribution(df_bal, "DOPO")
 
     df_bal.to_csv(args.output, index=False)
@@ -143,7 +130,6 @@ def main():
     print(f"  File: {args.output}")
     print(f"  Sample finali: {len(df_bal)}")
     print(f"  Cambio: {len(df)} -> {len(df_bal)} ({100*(len(df_bal)-len(df))/len(df):+.0f}%)")
-
 
 if __name__ == '__main__':
     main()
