@@ -247,17 +247,15 @@ class Client():
                 print("Client connected on %d.............." % self.port)
                 continue
             elif '***shutdown***' in sockdata:
+                # FIX: non chiudere il socket — torcs_env.reset() gestisce il restart via meta=1
+                # Shutdown = fine gara/giri, non fine del training
                 print((("Server has stopped the race on %d. "+
                         "You were in %d place.") %
-                        (self.port,self.S.d['racePos'])))
-                self.shutdown()
-                return
+                        (self.port,self.S.d.get('racePos', 0))))
+                return  # FIX: return senza shutdown — lascia che torcs_env gestisca il reset
             elif '***restart***' in sockdata:
-                # What do I do here?
                 print("Server has restarted the race on %d." % self.port)
-                # I haven't actually caught the server doing this.
-                self.shutdown()
-                return
+                return  # FIX: return senza shutdown — lascia che torcs_env gestisca il reset
             elif not sockdata: # Empty?
                 continue       # Try again.
             else:

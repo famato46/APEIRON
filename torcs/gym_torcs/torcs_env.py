@@ -1,11 +1,10 @@
 # ============================================================
-# FILE 1: torcs_env.py
+# FILE 1: torcs_env.py — Training definitivo da zero
 # ============================================================
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import snakeoil3_gym as snakeoil
-import torch
 
 
 class TorcsEnv(gym.Env):
@@ -16,6 +15,7 @@ class TorcsEnv(gym.Env):
         self.port = port
         self.client = None
         self.prev_damage = 0
+        self.step_count = 0
 
         self.action_space = spaces.Box(
             low=np.array([-1.0, 0.0, 0.0], dtype=np.float32),
@@ -50,12 +50,15 @@ class TorcsEnv(gym.Env):
 
         self.client = self._init_client()
         self.prev_damage = 0
+        self.step_count = 0
 
         self.client.get_servers_input()
         obs = self._make_obs()
         return obs, {}
 
     def step(self, action):
+        self.step_count += 1
+
         steer = float(np.clip(action[0], -1.0, 1.0))
         accel = float(np.clip(action[1],  0.0, 1.0))
         brake = float(np.clip(action[2],  0.0, 1.0))
@@ -83,24 +86,45 @@ class TorcsEnv(gym.Env):
         trackPos = self.client.S.d.get('trackPos', 0)
         angle    = self.client.S.d.get('angle', 0)
         damage   = self.client.S.d.get('damage', 0)
+        track    = self.client.S.d.get('track', [200] * 19)
+        if len(track) < 19:
+            track = list(track) + [200] * (19 - len(track))
 
         delta_damage = damage - self.prev_damage
         self.prev_damage = damage
 
-        # --- Reward orientata a massimizzare velocità media ---
-        reward = speedX * np.cos(angle)          # velocità utile lungo la pista
-        reward -= abs(speedX * np.sin(angle))    # penalizza componente laterale
-        reward -= abs(trackPos) * 2.0            # FIX: ridotta da 5.0 → lascia spazio in curva veloce
-        reward -= abs(steer) * 0.3               # FIX: ridotta da 0.5 → sterzo aggressivo tollerato
+        # --- Fase 1: primi 200 step — impara ad accelerare ---
+        if self.step_count < 200:
+            reward = accel * 5.0
+        else:
+            # --- Fase 2: reward principale ---
+            reward = speedX * np.cos(angle)
+            reward -= abs(speedX * np.sin(angle))
+
+            # FIX: penalità curva integrata fin dall'inizio, stessa scala della reward
+            # front_sensor corto = curva → penalizza velocità eccessiva proporzionalmente
+            front_sensor = track[9]
+            if front_sensor < 30.0 and speedX > 60.0:
+                reward -= (speedX - 60.0) * (30.0 - front_sensor) * 0.005
+
+        reward -= abs(trackPos) * 2.0
+        reward -= abs(steer) * 0.1
+        if speedX < 10:
+            reward -= brake * 2.0
 
         terminated = False
 
-        if abs(trackPos) > 1.5:                  # FIX: soglia alzata da 1.3 → più margine in curva
-            reward = -300.0                      # FIX: penalità aumentata per bilanciare soglia più larga
+        trackpos_limit = 1.8 if self.step_count < 500 else 1.5
+        if abs(trackPos) > trackpos_limit:
+            reward = -100.0
             terminated = True
 
-        if delta_damage > 0:                     # FIX: danno incrementale, non accumulato
-            reward = -300.0
+        if delta_damage > 100:
+            reward = -100.0
+            terminated = True
+
+        if self.step_count > 300 and speedX < 1.0:
+            reward = -50.0
             terminated = True
 
         return obs, float(reward), terminated, False, {}
