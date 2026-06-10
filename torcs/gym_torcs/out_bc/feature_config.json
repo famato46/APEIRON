@@ -3,7 +3,7 @@
     "speedX",
     "angle",
     "trackPos",
-    "dist_from_start",
+    "distFromStart",
     "track_0",
     "track_4",
     "track_9",
@@ -33,7 +33,7 @@
     "soglia_forte": 0.6,
     "dup_forte": 3
   },
-  "n_train": 60952,
-  "n_val": 4950,
-  "n_test": 4951
+  "n_train": 32323,
+  "n_val": 5476,
+  "n_test": 5476
 }

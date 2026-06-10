@@ -1,8 +1,8 @@
 """
-build_dataset_bc.py
--------------------
-Genera il dataset finale per il Behavioral Cloning (Fase 4) a partire dal CSV
-ripulito di Fase 2. Esegue:
+build_dataset.py
+----------------
+Genera il dataset finale per il Behavioral Cloning a partire dai CSV
+manual_log (output del logger TORCS). Esegue:
 
   1. Drop delle colonne inutili (opponents, sensori a varianza nulla, ecc.).
   2. Selezione delle 10 feature di input + 3 target.
@@ -21,9 +21,11 @@ ripulito di Fase 2. Esegue:
        - feature_config.json          (lista feature, target, parametri)
 
 Uso:
-    python build_dataset_bc.py dataset_clean.csv
-    python build_dataset_bc.py dataset_clean.csv -o ./out/ --plot
-    python build_dataset_bc.py dataset_clean.csv --extra-tracks   # +track_1/17
+    python build_dataset.py log1.csv log2.csv ... -o ./out_bc
+    python build_dataset.py log1.csv log2.csv ... -o ./out_bc --plot
+    python build_dataset.py log1.csv log2.csv ... --extra-tracks   # +track_1/17
+
+Accetta uno o più CSV manual_log da concatenare prima di processare.
 """
 
 import argparse
@@ -46,7 +48,7 @@ INPUT_FEATURES_BASE = [
     'speedX',
     'angle',
     'trackPos',
-    'dist_from_start',
+    'distFromStart',
     'track_0',
     'track_4',
     'track_9',
@@ -143,7 +145,7 @@ def split_train_val_test(df, val_frac, test_frac, seed=42):
 
 def main():
     parser = argparse.ArgumentParser(description="Genera il dataset BC finale.")
-    parser.add_argument('input', help='CSV in input (es. dataset_clean.csv)')
+    parser.add_argument('inputs', nargs='+', help='Uno o più CSV manual_log da concatenare')
     parser.add_argument('-o', '--outdir', default='./out_bc',
                         help='Cartella di output (default: ./out_bc)')
     parser.add_argument('--no-balance', action='store_true',
@@ -154,27 +156,35 @@ def main():
                         help='Salva istogrammi PNG prima/dopo')
     args = parser.parse_args()
 
-    in_path = Path(args.input)
-    if not in_path.exists():
-        print(f"ERROR: {in_path} non trovato")
-        sys.exit(1)
-
     out_dir = Path(args.outdir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Set feature finale
     if args.extra_tracks:
-        input_features = ['speedX','angle','trackPos','dist_from_start',
+        input_features = ['speedX','angle','trackPos','distFromStart',
                           'track_0','track_1','track_4','track_9','track_14',
                           'track_17','track_18','delta_track']
         print(">> Modalita' --extra-tracks: 12 feature di input (aggiunti track_1, track_17)")
     else:
         input_features = list(INPUT_FEATURES_BASE)
 
-    # ------ 1. Caricamento + feature engineering ------
-    print(f"[1/7] Carico {in_path}...")
-    df = pd.read_csv(in_path)
-    print(f"      Shape grezza: {df.shape}")
+    # ------ 1. Caricamento + concatenazione + feature engineering ------
+    dfs = []
+    for inp in args.inputs:
+        p = Path(inp)
+        if not p.exists():
+            print(f"WARN: {inp} non trovato, salto.")
+            continue
+        tmp = pd.read_csv(p)
+        dfs.append(tmp)
+        print(f"[1/?] Carico {p.name}: {len(tmp)} righe")
+
+    if not dfs:
+        print("ERROR: nessun file valido trovato.")
+        sys.exit(1)
+
+    df = pd.concat(dfs, ignore_index=True)
+    print(f"      Shape totale dopo concatenazione: {df.shape}")
 
     for f in input_features:
         if f == 'delta_track':
@@ -187,7 +197,7 @@ def main():
     print(f"      Aggiunta feature 'delta_track' = track_18 - track_0")
 
     # ------ 2. Selezione colonne ------
-    print(f"[2/7] Seleziono {len(input_features)} feature + {len(TARGETS)} target...")
+    print(f"[2/6] Seleziono {len(input_features)} feature + {len(TARGETS)} target...")
     df_sel = df[input_features + TARGETS].copy()
     print(f"      Shape selezionata: {df_sel.shape}")
 
@@ -197,7 +207,7 @@ def main():
         df_sel = df_sel.dropna().reset_index(drop=True)
 
     # ------ 3. Split 3-way ------
-    print(f"[3/7] Split train/val/test "
+    print(f"[3/6] Split train/val/test "
           f"({int((1-VAL_FRAC-TEST_FRAC)*100)}/{int(VAL_FRAC*100)}/{int(TEST_FRAC*100)})...")
     df_train, df_val, df_test = split_train_val_test(
         df_sel, val_frac=VAL_FRAC, test_frac=TEST_FRAC, seed=RANDOM_STATE)
@@ -205,16 +215,16 @@ def main():
 
     # ------ 4. Bilanciamento (solo training) ------
     if not args.no_balance:
-        print(f"[4/7] Bilancio il TRAINING set (val e test intatti)...")
+        print(f"[4/6] Bilancio il TRAINING set (val e test intatti)...")
         stampa_distrib_steer(df_train, "train PRIMA")
         df_train = bilancia_steer(df_train, seed=RANDOM_STATE)
         stampa_distrib_steer(df_train, "train DOPO")
         print(f"      Train dopo bilanciamento: {len(df_train)}")
     else:
-        print(f"[4/7] Bilanciamento DISABILITATO (--no-balance)")
+        print(f"[4/6] Bilanciamento DISABILITATO (--no-balance)")
 
     # ------ 5. Normalizzazione ------
-    print(f"[5/7] StandardScaler fittato sul training set...")
+    print(f"[5/6] StandardScaler fittato sul training set...")
     X_train = df_train[input_features].values.astype(np.float32)
     y_train = df_train[TARGETS].values.astype(np.float32)
     X_val   = df_val[input_features].values.astype(np.float32)
@@ -232,7 +242,7 @@ def main():
     print(f"      Test  scalato:  mean={X_test_s.mean():+.4f}  std={X_test_s.std():.4f}")
 
     # ------ 6. CSV human-readable con split ------
-    print(f"[6/7] Genero CSV human-readable con flag split...")
+    print(f"[6/6] Genero CSV human-readable con flag split...")
     df_tr = df_train.copy(); df_tr['split'] = 'train'
     df_va = df_val.copy();   df_va['split'] = 'val'
     df_te = df_test.copy();  df_te['split'] = 'test'
@@ -242,7 +252,7 @@ def main():
     print(f"      {csv_path}  ({len(df_full)} righe totali)")
 
     # ------ 7. Salvataggio artefatti per training/inferenza ------
-    print(f"[7/7] Salvo artefatti in {out_dir}/")
+    print(f"\n--- Salvo artefatti in {out_dir}/ ---")
 
     npz_path = out_dir / 'dataset_bc.npz'
     np.savez_compressed(
@@ -306,10 +316,10 @@ def main():
             print("      (matplotlib non disponibile, salto il plot)")
 
     print(f"\n=== FATTO ===")
-    print(f"In Fase 4 (training MLP) carica con:")
+    print(f"In train_mlp.py carica con:")
     print(f"  import numpy as np, joblib")
-    print(f"  data   = np.load('{npz_path}')")
-    print(f"  scaler = joblib.load('{scaler_path}')")
+    print(f"  data   = np.load('{out_dir}/dataset_bc.npz')")
+    print(f"  scaler = joblib.load('{out_dir}/scaler.joblib')")
     print(f"  X_train, y_train = data['X_train'], data['y_train']")
     print(f"  X_val,   y_val   = data['X_val'],   data['y_val']")
     print(f"  X_test,  y_test  = data['X_test'],  data['y_test']   # NON usare per tuning")
