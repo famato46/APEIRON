@@ -1,31 +1,3 @@
-"""
-build_dataset_bc.py
--------------------
-Genera il dataset finale per il Behavioral Cloning (Fase 4) a partire dal CSV
-ripulito di Fase 2. Esegue:
-
-  1. Drop delle colonne inutili (opponents, sensori a varianza nulla, ecc.).
-  2. Selezione delle 10 feature di input + 3 target.
-  3. Feature engineering: delta_track = track_18 - track_0.
-  4. Split train/val/test 80/10/10 (PRIMA del bilanciamento -> niente data leakage).
-       - Train: addestra i pesi
-       - Val  : early stopping e tuning iperparametri durante il training
-       - Test : valutazione finale, NON TOCCARE fino a fine progetto
-  5. Bilanciamento dello sterzo SOLO sul training set
-     (subsampling rettilinei + oversampling curve forti).
-  6. Normalizzazione StandardScaler fittata SOLO sul training set.
-  7. Salvataggio di:
-       - dataset_bc.csv               (versione human-readable, non scalata)
-       - dataset_bc.npz               (array numpy pronti per il training)
-       - scaler.joblib                (StandardScaler salvato per inferenza)
-       - feature_config.json          (lista feature, target, parametri)
-
-Uso:
-    python build_dataset_bc.py dataset_clean.csv
-    python build_dataset_bc.py dataset_clean.csv -o ./out/ --plot
-    python build_dataset_bc.py dataset_clean.csv --extra-tracks   # +track_1/17
-"""
-
 import argparse
 import json
 import sys
@@ -37,11 +9,6 @@ import joblib
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
-
-# ============================ CONFIG ============================
-
-# Feature di input scelte in Fase 3 (l'ordine viene preservato fino all'inferenza:
-# l'agente di guida deve costruire il vettore di stato esattamente in questo ordine).
 INPUT_FEATURES_BASE = [
     'speedX',
     'angle',
@@ -55,14 +22,12 @@ INPUT_FEATURES_BASE = [
     'delta_track',
 ]
 
-# Feature opzionali: aggiunte con --extra-tracks
-# track_1 e track_17 hanno r=+0.45/-0.46 con steer ma sono parzialmente ridondanti
-# con track_0/4/14/18. Da provare in Fase 4 se l'MLP fatica nelle curve di apertura.
+
 INPUT_FEATURES_EXTRA = ['track_1', 'track_17']
 
 TARGETS = ['steer', 'accel', 'brake']
 
-# Parametri di bilanciamento (applicati SOLO al training set)
+
 SOGLIA_DRITTO  = 0.05
 KEEP_DRITTO    = 0.30
 SOGLIA_DOLCE   = 0.10
@@ -72,13 +37,12 @@ SOGLIA_FORTE   = 0.60
 DUP_MEDIA      = 2
 DUP_FORTE      = 3
 
-# Split: 80% train, 10% val, 10% test
+
 VAL_FRAC      = 0.10
 TEST_FRAC     = 0.10
 RANDOM_STATE  = 42
 
 
-# ============================ HELPERS ============================
 
 def stampa_distrib_steer(df: pd.DataFrame, label: str = ""):
     bins = [-1.01, -0.6, -0.3, -0.10, -0.05, 0.05, 0.10, 0.30, 0.6, 1.01]
@@ -138,9 +102,6 @@ def split_train_val_test(df, val_frac, test_frac, seed=42):
             df_val.reset_index(drop=True),
             df_test.reset_index(drop=True))
 
-
-# ============================ MAIN ============================
-
 def main():
     parser = argparse.ArgumentParser(description="Genera il dataset BC finale.")
     parser.add_argument('input', help='CSV in input (es. dataset_clean.csv)')
@@ -171,7 +132,7 @@ def main():
     else:
         input_features = list(INPUT_FEATURES_BASE)
 
-    # ------ 1. Caricamento + feature engineering ------
+
     print(f"[1/7] Carico {in_path}...")
     df = pd.read_csv(in_path)
     print(f"      Shape grezza: {df.shape}")
@@ -186,7 +147,7 @@ def main():
     df['delta_track'] = df['track_18'] - df['track_0']
     print(f"      Aggiunta feature 'delta_track' = track_18 - track_0")
 
-    # ------ 2. Selezione colonne ------
+
     print(f"[2/7] Seleziono {len(input_features)} feature + {len(TARGETS)} target...")
     df_sel = df[input_features + TARGETS].copy()
     print(f"      Shape selezionata: {df_sel.shape}")
@@ -196,14 +157,14 @@ def main():
         print(f"      ATTENZIONE: {n_nan} NaN trovati, droppo.")
         df_sel = df_sel.dropna().reset_index(drop=True)
 
-    # ------ 3. Split 3-way ------
+
     print(f"[3/7] Split train/val/test "
           f"({int((1-VAL_FRAC-TEST_FRAC)*100)}/{int(VAL_FRAC*100)}/{int(TEST_FRAC*100)})...")
     df_train, df_val, df_test = split_train_val_test(
         df_sel, val_frac=VAL_FRAC, test_frac=TEST_FRAC, seed=RANDOM_STATE)
     print(f"      Train: {len(df_train)}   Val: {len(df_val)}   Test: {len(df_test)}")
 
-    # ------ 4. Bilanciamento (solo training) ------
+
     if not args.no_balance:
         print(f"[4/7] Bilancio il TRAINING set (val e test intatti)...")
         stampa_distrib_steer(df_train, "train PRIMA")
@@ -213,7 +174,7 @@ def main():
     else:
         print(f"[4/7] Bilanciamento DISABILITATO (--no-balance)")
 
-    # ------ 5. Normalizzazione ------
+
     print(f"[5/7] StandardScaler fittato sul training set...")
     X_train = df_train[input_features].values.astype(np.float32)
     y_train = df_train[TARGETS].values.astype(np.float32)
@@ -231,7 +192,7 @@ def main():
     print(f"      Val   scalato:  mean={X_val_s.mean():+.4f}  std={X_val_s.std():.4f}")
     print(f"      Test  scalato:  mean={X_test_s.mean():+.4f}  std={X_test_s.std():.4f}")
 
-    # ------ 6. CSV human-readable con split ------
+
     print(f"[6/7] Genero CSV human-readable con flag split...")
     df_tr = df_train.copy(); df_tr['split'] = 'train'
     df_va = df_val.copy();   df_va['split'] = 'val'
@@ -241,7 +202,7 @@ def main():
     df_full.to_csv(csv_path, index=False)
     print(f"      {csv_path}  ({len(df_full)} righe totali)")
 
-    # ------ 7. Salvataggio artefatti per training/inferenza ------
+
     print(f"[7/7] Salvo artefatti in {out_dir}/")
 
     npz_path = out_dir / 'dataset_bc.npz'
