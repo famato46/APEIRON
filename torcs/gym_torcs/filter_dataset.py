@@ -1,56 +1,22 @@
-"""
-Script di pulizia dei CSV raccolti dal bot TORCS.
-
-QUESTO SCRIPT NON va integrato nel bot.
-La raccolta deve registrare TUTTO (anche sample sporchi, anche giri brutti)
-con il flag is_clean a marcare la qualita'. Il filtraggio si fa qui, in una
-fase separata, perche':
-  - le soglie sono euristiche e vanno regolate dopo l'osservazione dei dati
-  - i sample "scartati oggi" potrebbero servire domani (es. recovery per RL)
-  - raccolta e pulizia sono fasi distinte: tieni i CSV grezzi come backup
-
-Uso:
-    python filter_dataset.py file1.csv file2.csv ... -o output.csv
-    python filter_dataset.py file1.csv file2.csv ... -o output.csv --only-good
-
-Per ogni CSV:
-  1. Identifica i giri (basato sui reset di cur_lap_time)
-  2. Classifica ogni giro in tre categorie:
-       - BUONO:    tempo<LAP_TIME_MAX, puliti>=CLEAN_PCT_MIN, v_max>=SPEED_MAX_MIN
-                   --> tieni tutti i sample con is_clean=1
-       - DECENTE:  giro completato ma sotto soglia (es. piu' lento o con piu'
-                   rumore). NON frozen, NON disastroso.
-                   --> tieni i sample con is_clean=1 (sono comunque guida
-                       valida, anche se sub-ottimale)
-       - SCARTATO: frozen (fine quick race), disastroso, incompleto
-                   --> butta tutto
-  3. Concatena tutto in un unico CSV finale
-
-Flag opzionale --only-good per usare solo giri BUONI (modalita' stretta).
-"""
-
 import pandas as pd
 import numpy as np
 import argparse
 import sys
 from pathlib import Path
 
-# Soglie BUONO: requisiti rigorosi per giri ottimali
+
 LAP_TIME_MAX = 115.0
 CLEAN_PCT_MIN = 92.0
 SPEED_MAX_MIN = 215.0
 
-# Soglie DISASTRO: oltre cui buttiamo via tutto
 DISASTER_LAP_TIME = 125.0
 DISASTER_CLEAN_PCT = 75.0
 DISASTER_V_MAX = 180.0
 
-# Frozen detection (TORCS bloccato a fine quick race)
 FROZEN_PCT_MAX = 10.0
 
 
 def split_into_laps(df: pd.DataFrame):
-    """Divide il DataFrame in liste di DataFrame, uno per giro."""
     lap_resets = []
     prev_t = -999
     for i, t in enumerate(df['cur_lap_time'].values):
@@ -68,7 +34,6 @@ def split_into_laps(df: pd.DataFrame):
 
 
 def evaluate_lap(lap_df: pd.DataFrame) -> dict:
-    """Calcola le metriche di un giro."""
     frozen_count = 0
     if len(lap_df) > 10:
         same = (lap_df['speedX'].diff().abs() < 0.001) & \
@@ -86,9 +51,6 @@ def evaluate_lap(lap_df: pd.DataFrame) -> dict:
 
 
 def classify_lap(metrics: dict):
-    """
-    Classifica il giro: 'BUONO', 'DECENTE', 'SCARTATO'.
-    """
     if metrics['n_steps'] < 1000:
         return 'SCARTATO', "troppo corto (probabilmente incompleto)"
     if metrics['frozen_pct'] > FROZEN_PCT_MAX:

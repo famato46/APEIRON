@@ -1,22 +1,3 @@
-"""
-train_mlp.py  —  Fase 4: Behavioral Cloning con scikit-learn MLPRegressor
-========================================================================
-
-Pipeline:
-  1. Carica gli artefatti prodotti da build_dataset_bc.py (Fase 3).
-  2. Allena una baseline veloce per avere un riferimento immediato.
-  3. Esegue una piccola grid search su architettura + learning rate,
-     usando il validation set per la selezione.
-  4. Ri-allena il modello migliore con più pazienza (max_iter alto).
-  5. Valuta il modello finale sul TEST set (non toccato finora).
-  6. Salva model_bc.joblib e training_report.json.
-
-Uso:
-    python train_mlp.py
-    python train_mlp.py --data ./out_bc --out ./models
-    python train_mlp.py --quick        # baseline + 1 grid leggera
-"""
-
 import argparse
 import json
 import sys
@@ -29,32 +10,25 @@ from sklearn.neural_network import MLPRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 
-# ============================ CONFIG ============================
-
-# Grid search: 4 architetture x 2 learning rate = 8 combinazioni (~ 1-3 min)
 ARCHITECTURES = [
-    (64,),            # rete piccola, baseline
-    (64, 32),         # 2 hidden layer, profondità minima
-    (128, 64),        # 2 hidden layer, più capacità
-    (128, 64, 32),    # 3 hidden layer, capacità massima
+    (64,),          
+    (64, 32),        
+    (128, 64),        
+    (128, 64, 32),    
 ]
 LEARNING_RATES = [1e-3, 5e-4]
-ACTIVATION     = 'tanh'      # buona per output in [-1,1]; ReLU è alternativa valida
+ACTIVATION     = 'tanh'      
 SOLVER         = 'adam'
 
-# Iperparametri training
-MAX_ITER_GRID  = 200          # epoche durante la grid (con early stopping)
-MAX_ITER_FINAL = 500          # epoche per il training finale
-PATIENCE       = 15           # epoche senza miglioramento prima di stop
-VAL_FRAC_ES    = 0.10         # frazione del train usata internamente da MLPRegressor
-                              # per il suo early stopping (separata dal nostro val set)
+
+MAX_ITER_GRID  = 200          
+MAX_ITER_FINAL = 500          
+PATIENCE       = 15         
+VAL_FRAC_ES    = 0.10         
 RANDOM_STATE   = 42
 
 
-# ============================ HELPERS ============================
-
 def carica_dataset(data_dir: Path):
-    """Carica .npz + config dal folder di Fase 3."""
     npz_path = data_dir / 'dataset_bc.npz'
     cfg_path = data_dir / 'feature_config.json'
     if not npz_path.exists():
@@ -66,7 +40,6 @@ def carica_dataset(data_dir: Path):
 
 
 def metriche(y_true, y_pred, prefix=""):
-    """Calcola MSE, MAE, R² globali e per target."""
     targets = ['steer', 'accel', 'brake']
     mse = mean_squared_error(y_true, y_pred)
     mae = mean_absolute_error(y_true, y_pred)
@@ -92,7 +65,6 @@ def stampa_metriche(m, label):
 
 
 def fit_mlp(X_train, y_train, arch, lr, max_iter, verbose=False):
-    """Crea e addestra un MLPRegressor con gli iperparametri richiesti."""
     mlp = MLPRegressor(
         hidden_layer_sizes=arch,
         activation=ACTIVATION,
@@ -109,8 +81,6 @@ def fit_mlp(X_train, y_train, arch, lr, max_iter, verbose=False):
     return mlp
 
 
-# ============================ MAIN ============================
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', default='./out_bc',
@@ -125,7 +95,6 @@ def main():
     out_dir  = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # --- 1. Carico dataset ---
     print(f"[1/5] Carico dataset da {data_dir}")
     data, cfg = carica_dataset(data_dir)
     X_train, y_train = data['X_train'], data['y_train']
@@ -136,7 +105,6 @@ def main():
     print(f"      Train: {X_train.shape}   Val: {X_val.shape}   Test: {X_test.shape}")
     print(f"      Feature: {len(feature_names)} input, {y_train.shape[1]} target")
 
-    # --- 2. Baseline veloce ---
     print(f"\n[2/5] Baseline: (64, 32), lr=1e-3, max_iter=100")
     t0 = time.time()
     baseline = fit_mlp(X_train, y_train, (64, 32), 1e-3, max_iter=100)
@@ -146,7 +114,6 @@ def main():
     print(f"      Training: {t_base:.1f}s, converged @ epoch {baseline.n_iter_}")
     stampa_metriche(base_m, "BASELINE Val")
 
-    # --- 3. Grid search ---
     archs = ARCHITECTURES if not args.quick else [(64,), (64, 32)]
     lrs   = LEARNING_RATES if not args.quick else [1e-3]
     total = len(archs) * len(lrs)
@@ -173,12 +140,11 @@ def main():
             })
     print(f"      Grid completata in {time.time()-t0:.1f}s")
 
-    # Selezione: minimizziamo MAE totale sul VAL set
     best = min(risultati, key=lambda r: r['metrics']['mae_total'])
     print(f"\n   ===> MIGLIORE: arch={tuple(best['arch'])}  lr={best['lr']:.0e}")
     print(f"        Val MAE: {best['metrics']['mae_total']:.4f}")
 
-    # --- 4. Training finale con più epoche ---
+
     print(f"\n[4/5] Training finale con max_iter={MAX_ITER_FINAL}")
     t0 = time.time()
     final = fit_mlp(X_train, y_train,
@@ -190,18 +156,15 @@ def main():
     print(f"      Training: {t_final:.1f}s, converged @ epoch {final.n_iter_}")
     stampa_metriche(final_val_m, "MODELLO FINALE Val")
 
-    # --- 5. Valutazione sul TEST set (mai visto prima) ---
     print(f"\n[5/5] Valutazione TEST set (mai usato per tuning)")
     test_pred = final.predict(X_test)
     test_m = metriche(y_test, test_pred)
     stampa_metriche(test_m, "MODELLO FINALE Test")
 
-    # Differenze val vs test: indicatore di overfitting
     gap = test_m['mae_total'] - final_val_m['mae_total']
     print(f"\n   Gap MAE val→test: {gap:+.4f}  "
           f"({'overfitting sospetto' if gap > 0.01 else 'generalizzazione OK'})")
 
-    # --- Salvataggio ---
     model_path = out_dir / 'model_bc.joblib'
     joblib.dump(final, model_path)
     print(f"\n   Modello salvato: {model_path}")
@@ -227,7 +190,6 @@ def main():
     report_path.write_text(json.dumps(report, indent=2))
     print(f"   Report salvato: {report_path}")
 
-    # --- Quick eyeball: distribuzione errori per range di sterzo ---
     print(f"\n   === Errore MAE per regime di sterzo (su test set) ===")
     abs_steer = np.abs(y_test[:, 0])
     masks = [

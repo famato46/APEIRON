@@ -1,17 +1,3 @@
-"""
-TORCS bot di guida.
-
-Pilota la macchina sul circuito e logga in un CSV, per ogni step, lo stato
-del simulatore e l'azione decisa.
-
-Architettura del controllore:
-  - sterzo: heading feedback + cross-track feedback + feedforward sui sensori
-  - velocita' target dipendente dalla distanza vista davanti e dalla curvatura
-  - throttle/brake con deadband, trail braking e riaccelerazione anticipata
-  - traction control via wheelSpinVel
-  - cambio marce con isteresi e cooldown
-"""
-
 import socket
 import sys
 import getopt
@@ -46,10 +32,6 @@ def clip(v, lo, hi):
     if v > hi: return hi
     return v
 
-
-# =====================================================================
-# NETWORKING / PROTOCOLLO SCR
-# =====================================================================
 
 class Client():
     def __init__(self, H=None, p=None, i=None, e=None, t=None, s=None, d=None, vision=False):
@@ -216,12 +198,6 @@ def destringify(s):
         if len(s) < 2: return destringify(s[0])
         return [destringify(i) for i in s]
 
-
-# =====================================================================
-# OVERRIDE MANUALE DA TASTIERA
-# I sample raccolti durante l'override NON vengono salvati nel CSV.
-# =====================================================================
-
 manual_steer = 0.0
 manual_accel_override = None
 manual_brake_override = None
@@ -258,11 +234,6 @@ listener = Listener(on_press=on_press, on_release=on_release)
 listener.start()
 
 
-# =====================================================================
-# LOGICA DI GUIDA
-# =====================================================================
-
-# --- Parametri sterzo ---
 STEER_K_E              = 1.0
 STEER_K_SOFT           = 5.0
 STEER_K_HEADING        = 1.3
@@ -272,11 +243,9 @@ ANGLE_FILTER_ALPHA     = 0.4
 STEER_MAX_DELTA        = 0.13
 STEER_RAD_TO_CMD       = 1.0
 
-# --- Debug ---
 DEBUG_STEERING       = True
 DEBUG_PRINT_EVERY    = 25
 
-# --- Parametri velocita' ---
 SPEED_MAP = [
     (200.0, 310.0),
     (150.0, 250.0),
@@ -291,12 +260,10 @@ CURV_THRESHOLD     = 0.08
 CURV_FULL_CUT      = 0.45
 CURV_MAX_REDUCTION = 0.35
 
-# --- Cambio marce ---
 RPM_UP   = 9000
 RPM_DOWN = 6500
 GEAR_MIN_SPEED = [0, 0, 35, 65, 100, 130, 175]
 
-# --- Quality gate ---
 QUALITY_MAX_TRACKPOS = 0.85
 QUALITY_MAX_ANGLE    = 0.35
 QUALITY_MIN_SPEED    = 5.0
@@ -313,11 +280,6 @@ _state = {
 
 
 def effective_front_distance(track):
-    """
-    Distanza utile davanti per decidere la velocita'.
-    Uso il MAX tra i sensori a piccolo angolo per evitare che un singolo
-    sensore "pescando" sul muro laterale strangoli il target di velocita'.
-    """
     candidates = []
     for idx in (3, 4, 9, 14, 15):
         v = track[idx]
@@ -329,7 +291,6 @@ def effective_front_distance(track):
 
 
 def lookup_target_speed(track):
-    """Velocita' target = SPEED_MAP(distanza vista) modulata per curvatura."""
     front_dist = effective_front_distance(track)
     pts = SPEED_MAP
 
@@ -357,12 +318,6 @@ def lookup_target_speed(track):
 
 
 def estimate_curvature(track):
-    """
-    Stima la curvatura imminente confrontando i sensori track laterali lontani.
-    Sensori SCR (default angles): -45 -19 -12 -7 -4 -2.5 -1.7 -1 -0.5 0 0.5 1 1.7 2.5 4 7 12 19 45
-    indici:                          0   1   2  3  4   5    6   7   8  9 10 11  12  13 14 15 16 17 18
-    Convenzione: ritorno > 0 => sterzo POSITIVO richiesto (sinistra).
-    """
     pairs = [
         ( 0, 18, 0.40),
         ( 1, 17, 0.35),
@@ -389,11 +344,6 @@ def estimate_curvature(track):
 
 
 def calculate_steering(S):
-    """
-    Controller di sterzo a tre componenti: heading feedback, cross-track
-    feedback (Stanley), lookahead feedforward. In modalita' recovery
-    (|angle|>0.5 rad o |trackPos|>0.9) disabilita il feedforward.
-    """
     angle      = S.get('angle', 0.0)
     track_pos  = S.get('trackPos', 0.0)
     track      = S.get('track', [200.0] * 19)
@@ -421,7 +371,6 @@ def calculate_steering(S):
     raw_steer = heading_term + cross_track_term + lookahead_term
     target_steer = clip(raw_steer * STEER_RAD_TO_CMD, -1.0, 1.0)
 
-    # Slew rate limit scalato sulla velocita'
     if speedX_kmh < 60:
         max_delta = 0.18
     elif speedX_kmh < 100:
@@ -458,10 +407,6 @@ def calculate_steering(S):
 
 
 def calculate_throttle_and_brake(S, target_speed):
-    """
-    Throttle/brake con deadband, trail braking e riaccelerazione anticipata
-    in uscita di curva. In modalita' recovery: niente gas.
-    """
     speedX = S.get('speedX', 0.0)
     angle = S.get('angle', 0.0)
     track_pos = S.get('trackPos', 0.0)
@@ -475,7 +420,6 @@ def calculate_throttle_and_brake(S, target_speed):
     delta = target_speed - speedX
     BRAKE_DEADBAND = 8.0
 
-    # Unwinding: sterzo attuale piu' vicino a zero della EMA lenta
     prev = _state['prev_steer']
     ema = _state['steer_ema_slow']
     is_unwinding = (abs(ema) > 0.20) and (abs(prev) < abs(ema) - 0.08)
@@ -497,7 +441,6 @@ def calculate_throttle_and_brake(S, target_speed):
         else:
             accel = 0.0
 
-    # Lift-off in curva: solo a sterzo > 0.35
     steer_abs = abs(prev)
     if steer_abs > 0.35 and accel > 0:
         accel *= (1.0 - 0.25 * (steer_abs - 0.35) / 0.65)
@@ -507,7 +450,6 @@ def calculate_throttle_and_brake(S, target_speed):
 
 
 def traction_control(S, accel):
-    """Riduce gas se le ruote posteriori girano molto piu' delle anteriori."""
     wsv = S.get('wheelSpinVel', None)
     if not wsv or len(wsv) != 4:
         return accel
@@ -522,7 +464,6 @@ def traction_control(S, accel):
 
 
 def shift_gears(S):
-    """Cambio basato su RPM, con guard sulla velocita' minima per marcia e cooldown."""
     speedX = S.get('speedX', 0.0)
     rpm    = S.get('rpm', 0.0)
 
@@ -548,7 +489,6 @@ def shift_gears(S):
 
 
 def drive(c):
-    """Funzione principale di guida. Modifica c.R.d in-place."""
     S = c.S.d
     R = c.R.d
 
@@ -571,12 +511,7 @@ def drive(c):
             R['brake'] = manual_brake_override
 
 
-# =====================================================================
-# QUALITY GATE: decide se il sample va salvato nel CSV.
-# =====================================================================
-
 def is_sample_clean(S, step_index):
-    """Ritorna True se il sample e' adatto al training."""
     if step_index < WARMUP_STEPS:
         return False
     if is_manual_override:
@@ -597,10 +532,6 @@ def is_sample_clean(S, step_index):
         return False
     return True
 
-
-# =====================================================================
-# MAIN LOOP
-# =====================================================================
 
 if __name__ == "__main__":
     C = Client(p=3001)

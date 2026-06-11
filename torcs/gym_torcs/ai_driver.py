@@ -1,13 +1,3 @@
-"""
-ai_driver.py — Bot TORCS basato su MLP addestrato in Fase 4
-
-v2: fix dei bug del log del 14/05
-  - FIX: gear logic con parentesi corrette + initial gear=1 stabile
-  - FIX: anti-overspeed in curva (prefrenata se track_9 si accorcia troppo veloce)
-  - FIX: recovery testacoda (|angle|>1.5 rad) con sequenza dedicata
-  - Resto invariato: blend MLP + safety geometrico, mapping camelCase, ecc.
-"""
-
 import socket
 import sys
 import json
@@ -18,10 +8,6 @@ import numpy as np
 import joblib
 
 
-# =================================================================
-# CONFIG
-# =================================================================
-
 HOST = 'localhost'
 PORT = 3001
 DATA_SIZE = 2**17
@@ -30,30 +16,23 @@ MODEL_PATH       = 'models/model_bc.joblib'
 SCALER_PATH      = 'scaler.joblib'
 FEATURE_CFG_PATH = 'feature_config.json'
 
-# Soglie safety net standard
 TRACKPOS_SAFE   = 0.85
 TRACKPOS_BLEND  = 0.70
 ANGLE_SAFE      = 0.30
 RECOVERY_STEER_GAIN = 0.5
 RECOVERY_ANGLE_GAIN = 2.0
 
-# Soglie testacoda
-SPIN_ANGLE      = 1.2     # rad ~ 70 gradi: oltre, siamo decisamente di traverso
-SPIN_RECOVERY_MAX_SPEED = 30.0  # km/h
 
-# Anti-overspeed in curva
-PREBRAKE_TRACK9_THRESHOLD = 50.0   # m: track_9 sotto questo = "curva vicina"
-PREBRAKE_SPEED_THRESHOLD  = 100.0  # km/h
+SPIN_ANGLE      = 1.2     
+SPIN_RECOVERY_MAX_SPEED = 30.0  
+
+PREBRAKE_TRACK9_THRESHOLD = 50.0   
+PREBRAKE_SPEED_THRESHOLD  = 100.0  
 PREBRAKE_FORCE            = 0.5
 
-# Anti-stallo
 MIN_SPEED_STALL = 5.0
 STALL_PATIENCE  = 100
 
-
-# =================================================================
-# CARICAMENTO MODELLO
-# =================================================================
 
 print("[ai_driver] Caricamento modelli...")
 try:
@@ -76,11 +55,6 @@ try:
 except Exception as e:
     print(f"[ai_driver] ERRORE caricamento: {e}")
     sys.exit(1)
-
-
-# =================================================================
-# CONNESSIONE TORCS
-# =================================================================
 
 def setup_connection():
     so = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -111,10 +85,6 @@ def parse_server_str(server_string):
     return d
 
 
-# =================================================================
-# COSTRUZIONE VETTORE STATO
-# =================================================================
-
 def build_state(S):
     track = S.get('track', [200.0] * 19)
     stato = {
@@ -135,17 +105,11 @@ def build_state(S):
                  dtype=np.float32)
     return x
 
-
-# =================================================================
-# SAFETY NET geometrico
-# =================================================================
-
 def recovery_steer(track_pos, angle):
     return float(np.clip(
         -track_pos * RECOVERY_STEER_GAIN + angle * RECOVERY_ANGLE_GAIN,
         -1.0, 1.0,
     ))
-
 
 def blend_factor(track_pos, angle):
     abs_tp = abs(track_pos)
@@ -162,17 +126,8 @@ def blend_factor(track_pos, angle):
         w_an = max(0.0, (abs_an - ANGLE_SAFE * 0.5) / (ANGLE_SAFE * 0.5))
     return max(w_tp, w_an)
 
-
-# =================================================================
-# CAMBIO MARCE — FIX precedenza operatori
-# =================================================================
-
 def gear_logic(speed_kmh, current_gear):
-    """
-    Cambio marce con isteresi. Logica corretta:
-      - speed < -5 km/h e auto chiaramente all'indietro -> retro
-      - altrimenti scelgo marcia in base alla velocita' assoluta
-    """
+    
     if speed_kmh < -5.0:
         return -1
 
@@ -191,20 +146,11 @@ def gear_logic(speed_kmh, current_gear):
     return g
 
 
-# =================================================================
-# RECOVERY TESTACODA
-# =================================================================
-
 def is_spinning(angle, speed_x):
     return abs(angle) > SPIN_ANGLE
 
 
 def spin_recovery_action(angle, track_pos, speed_x):
-    """
-    1. Se ancora veloci: freno duro.
-    2. Se lenti e girati al contrario (|angle|>pi/2): retromarcia controllata.
-    3. Se solo di traverso ma orientati avanti: gas leggero + sterzo correttivo.
-    """
     if speed_x > SPIN_RECOVERY_MAX_SPEED:
         return {
             'steer': float(np.clip(-angle * 0.5, -1.0, 1.0)),
@@ -230,17 +176,9 @@ def spin_recovery_action(angle, track_pos, speed_x):
         }
 
 
-# =================================================================
-# PREFRENATA AUTOMATICA
-# =================================================================
-
 def needs_prebrake(track_9, speed_x):
     return track_9 < PREBRAKE_TRACK9_THRESHOLD and speed_x > PREBRAKE_SPEED_THRESHOLD
 
-
-# =================================================================
-# LOOP PRINCIPALE
-# =================================================================
 
 def run_ai():
     so = setup_connection()
@@ -275,7 +213,7 @@ def run_ai():
             track     = S.get('track',    [200.0] * 19)
             track_9   = track[9] if len(track) > 9 else 200.0
 
-            # MODALITA' RECOVERY TESTACODA
+            
             if is_spinning(angle, speed_x):
                 in_recovery = True
                 recovery_counter += 1
@@ -294,7 +232,7 @@ def run_ai():
                 w_log = 99.0
                 steer_mlp = float('nan')
             else:
-                # GUIDA NORMALE
+                
                 x = build_state(S)
                 x_scaled = scaler.transform(x)
                 y = model.predict(x_scaled)[0]
@@ -318,7 +256,6 @@ def run_ai():
                 gear = gear_logic(speed_x, gear)
                 w_log = w
 
-            # Anti-stallo
             if not in_recovery and abs(speed_x) < MIN_SPEED_STALL:
                 stall_counter += 1
                 if stall_counter > STALL_PATIENCE:

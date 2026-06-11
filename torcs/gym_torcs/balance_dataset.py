@@ -1,10 +1,3 @@
-"""
-Bilanciamento dataset per MLP da multipli file CSV.
-Uso:
-    python balance_dataset.py run1.csv run2.csv -o dataset_balanced.csv
-    python balance_dataset.py cartella_dati/*.csv -o dataset_balanced.csv
-"""
-
 import pandas as pd
 import numpy as np
 import argparse
@@ -12,7 +5,6 @@ import sys
 from pathlib import Path
 import glob
 
-# Parametri di bilanciamento
 SOGLIA_DRITTO = 0.05
 KEEP_DRITTO = 0.30
 
@@ -36,27 +28,22 @@ def balance_by_steer(df: pd.DataFrame, seed: int = 42) -> pd.DataFrame:
 
     parts = []
 
-    # 1. Rettilinei
     dritto = df[mask_dritto]
     n_keep = int(len(dritto) * KEEP_DRITTO)
     idx = rng.choice(len(dritto), n_keep, replace=False)
     parts.append(dritto.iloc[idx])
 
-    # 2. Curve dolci
     dolce = df[mask_dolce]
     n_keep = int(len(dolce) * KEEP_DOLCE)
     idx = rng.choice(len(dolce), n_keep, replace=False)
     parts.append(dolce.iloc[idx])
 
-    # 3. Curve normali
     parts.append(df[mask_normale])
 
-    # 4. Curve medie
     media = df[mask_media]
     for _ in range(DUP_MEDIA):
         parts.append(media)
 
-    # 5. Curve forti
     forte = df[mask_forte]
     for _ in range(DUP_FORTE):
         parts.append(forte)
@@ -87,7 +74,6 @@ def main():
     parser.add_argument('--seed', type=int, default=42, help='Seed per random (default: 42)')
     args = parser.parse_args()
 
-    # Espansione dei percorsi (risolve i *.csv)
     all_files = []
     for path in args.inputs:
         all_files.extend(glob.glob(path))
@@ -101,7 +87,6 @@ def main():
     dfs = []
     righe_totali = 0
     
-    # Nuovo LOG per ogni singolo file
     for f in all_files:
         try:
             df_temp = pd.read_csv(f)
