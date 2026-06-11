@@ -11,54 +11,164 @@
     </td>
   </tr>
 </table>
+
 <h1>🏎️ APEIRON - AI Autonomous Racing Team</h1>
 
-Welcome to the official repository of team APEIRON, one of the UNISA (University of Salerno) teams participating in the IBM AI Racing Competition.
-This repository contains the driver code for developing an autonomous driving agent within the TORCS simulator, with parameters and features optimized using __IBM Granite__.
+Repository ufficiale del team APEIRON (Gruppo 15), partecipante alla IBM AI Racing League — Università degli Studi di Salerno, A.A. 2025/2026.
 
-<h2>IBM AI Racing Competition Project (team 15) --> APEIRON (UNISA)</h2>
+<h3>Team:</h3>
 
-<h3>Our Team:</h3>
-
-- Francesca Gaia Amato 
-- Giovanni Guercia 
+- Francesca Gaia Amato
+- Giovanni Guercia
 - Bruno Oliva
 - Carmine Fonzo
 - Simone De Riggi
 
-<h2> 🎯 Strategia di Sviluppo: BC + RL </h2>
+---
 
-Per massimizzare l'efficienza dell'addestramento ed evitare che l'agente parta da una conoscenza nulla (comportamento casuale), abbiamo scelto una pipeline in due fasi:
+## 🎯 Approccio: Imitation Learning
 
-1. **Fase 1: Behavioral Cloning (BC):** Inizializzazione della policy tramite apprendimento supervisionato su un dataset di dimostrazioni esperte.
-2. **Fase 2: Reinforcement Learning (RL) Fine-tuning:** Ottimizzazione della policy pre-addestrata tramite interazione diretta con l'ambiente per superare le prestazioni dell'esperto.
+L'agente è sviluppato tramite **Behavioral Cloning (BC)**: un bot deterministico guida il circuito Corkscrew raccogliendo dati di alta qualità, che vengono poi usati per addestrare una rete neurale MLP a imitarne il comportamento.
 
-<h2> 🛠️ Stato Attuale della Fase 1: Creazione dell'Esperto </h2>
+---
 
-Attualmente, il lavoro è focalizzato sulla **costruzione di un "Expert Bot"** solido. Prima di poter addestrare una rete neurale a imitare un comportamento, è necessario che il comportamento sorgente sia di alta qualità.
+## 🛠️ Pipeline (6 fasi)
 
-### Attività in corso:
+| Fase | Descrizione | Script |
+|------|-------------|--------|
+| 1 | Sviluppo bot esperto | `torcs_jm_par_modulare.py` |
+| 2 | Raccolta dati (CSV grezzi) | `torcs_jm_par_modulare.py` |
+| 3 | Filtraggio e bilanciamento | `filter_dataset.py`, `balance_dataset.py` |
+| 4 | EDA, feature engineering, split, normalizzazione | `build_dataset.py` |
+| 5 | Training MLP multi-output | `train_mlp.py` |
+| 6 | Agente AI con safety net | `ai_driver.py` |
 
-* **Modifica di `modular_control.py`:** Stiamo rifinando la logica di controllo all'interno dell'ambiente `gym_torcs`.
-* **Sviluppo con IBM Granite:** Per lo sviluppo e l'ottimizzazione di questa fase, l'utilizzo di **IBM Granite** è stato essenziale, permettendo di strutturare in modo efficiente la logica modulare e risolvere le criticità nel controllo dei sensori.
-* **Feature Engineering:** Selezione dei sensori critici (raggi `track`, `trackPos`, `angle`, `speedX`) per fornire alla rete neurale un input pulito e normalizzato.
-* **Data Collection:** Una volta rifinito il bot modulare, verrà utilizzato per generare il dataset di coppie (Stato, Azione) necessario per il Behavioral Cloning.
+---
 
-## 🚀 Prossimi Passi
+## 📂 Struttura del Repository
 
-### Fase 2: Reinforcement Learning
+```
+torcs/gym_torcs/
+├── torcs_jm_par_modulare.py   # Bot esperto + raccolta dati
+├── filter_dataset.py          # Filtraggio giri per qualità
+├── balance_dataset.py         # Bilanciamento sterzo multi-file
+├── build_dataset.py           # Feature engineering, split, normalizzazione
+├── train_mlp.py               # Training MLPRegressor
+├── ai_driver.py               # Agente finale con safety net
+├── out_bc/                    # Artefatti: dataset_bc.npz, scaler.joblib, feature_config.json
+└── models/                    # Modello addestrato: model_bc.joblib
+```
 
-Una volta ottenuta una policy che riesce a completare i giri di pista seguendo l'esempio del bot, passeremo alla fase di ottimizzazione tramite RL.
+---
 
-* **Algoritmo:** [TBD - In fase di valutazione tra DDPG, PPO, SAC o TD3].
-* **Reward Function:** Definizione di una funzione di ricompensa che premi la velocità media e la stabilità.
-  
-## 🙏 Ringraziamenti
+## ⚙️ Installazione e Setup
 
-Un ringraziamento speciale va a **IBM Granite** per il supporto fondamentale fornito nella generazione e nel raffinamento della logica algoritmica di questa fase iniziale del progetto.
+### 1. Prerequisiti
 
-## 📦 Requisiti e Setup
+- [Visual Studio Code](https://code.visualstudio.com/)
+- [Git](https://git-scm.com/)
+- [Git LFS](https://git-lfs.com/) — necessario per scaricare i file grandi (modelli, dataset)
+- Python 3.x
+- TORCS installato e configurato tramite **Simula Studio**
 
-* **Ambiente:** `gym_torcs` / `pyTORCS`
-* **Linguaggio:** Python 3.x
-* **Librerie principali:** NumPy, TensorFlow/PyTorch, Stable-Baselines3 (previsto)
+### 2. Installa Git LFS
+
+> ⚠️ Questo passaggio va fatto **prima** di clonare il repository, altrimenti i file grandi non vengono scaricati correttamente.
+
+```bash
+# Installa Git LFS sul tuo sistema
+git lfs install
+```
+
+### 3. Clona il repository
+
+```bash
+git clone https://github.com/famato46/APEIRON.git
+cd APEIRON
+```
+
+### 4. Installa le dipendenze Python
+
+```bash
+pip install numpy pandas scikit-learn joblib pynput
+```
+
+---
+
+## 🚀 Come Usare il Progetto
+
+Tutti i comandi vanno eseguiti dal terminale di Visual Studio Code, dalla cartella `torcs/gym_torcs/`.
+
+```bash
+cd torcs/gym_torcs
+```
+
+### Fase 2 — Raccolta dati con il bot esperto
+
+Avvia prima TORCS tramite Simula Studio, poi lancia il bot:
+
+```bash
+python torcs_jm_par_modulare.py
+```
+
+I CSV vengono salvati automaticamente in `torcs/gym_torcs/` con il nome `dataset_track_<timestamp>.csv`.
+Usa le frecce della tastiera per intervenire manualmente se necessario — le manovre manuali non vengono registrate nel CSV.
+
+### Fase 3 — Filtraggio dei giri
+
+```bash
+python filter_dataset.py dataset_track_*.csv -o dataset_filtered.csv
+```
+
+Aggiunge `--only-good` per usare solo i giri migliori:
+
+```bash
+python filter_dataset.py dataset_track_*.csv -o dataset_filtered.csv --only-good
+```
+
+### Fase 3 — Bilanciamento del dataset
+
+```bash
+python balance_dataset.py dataset_filtered.csv -o dataset_balanced.csv
+```
+
+### Fase 4 — Feature engineering, split e normalizzazione
+
+```bash
+python build_dataset.py dataset_balanced.csv -o ./out_bc
+```
+
+### Fase 5 — Training del modello MLP
+
+```bash
+python train_mlp.py --data ./out_bc --out ./models
+```
+
+Per un test rapido con meno combinazioni:
+
+```bash
+python train_mlp.py --data ./out_bc --out ./models --quick
+```
+
+### Fase 6 — Lancio dell'agente AI
+
+Avvia prima TORCS tramite Simula Studio, poi lancia l'agente:
+
+```bash
+python ai_driver.py
+```
+
+---
+
+## 📊 Risultati
+
+| Agente | Tempo sul Giro |
+|--------|---------------|
+| Bot Esperto Deterministico | 1:36 – 1:42 |
+| MLP Behavioral Cloning | ~1:36 |
+
+---
+
+## 🔮 Sviluppi Futuri
+
+È stato tentato un fine-tuning tramite Reinforcement Learning (Soft Actor-Critic) per superare il tetto prestazionale del BC, ma i tentativi non hanno prodotto risultati utilizzabili a causa di instabilità durante l'addestramento. Rimane il principale sviluppo futuro del progetto.
